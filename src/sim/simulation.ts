@@ -46,6 +46,8 @@ const FEED_RADIUS = 30
 const FEED_STRENGTH = 5
 const WOUND_RADIUS = 70
 const WOUND_STEPS = 18
+// Share of the fast channel kept per step. About 0.86 holds half a second at 60 fps.
+const ACTIVITY_DECAY = 0.86
 
 
 async function compile(device: GPUDevice, label: string, body: string): Promise<GPUShaderModule> {
@@ -66,6 +68,7 @@ export class Simulation {
   private readonly paramsBuffer: GPUBuffer
   private readonly paramsData = new DataView(new ArrayBuffer(PARAMS_BYTES))
   private readonly depositBuffer: GPUBuffer
+  private readonly activityBuffer: GPUBuffer
   private readonly initPipeline: GPUComputePipeline
   private readonly stepPipeline: GPUComputePipeline
   private readonly gatherPipeline: GPUComputePipeline
@@ -153,8 +156,13 @@ export class Simulation {
       size: cells * 4,
       usage: trailUsage,
     })
+    this.activityBuffer = device.createBuffer({
+      label: 'activity',
+      size: cells * 4,
+      usage: trailUsage,
+    })
 
-    this.buffers = [this.paramsBuffer, particles, this.depositBuffer, ...trails]
+    this.buffers = [this.paramsBuffer, particles, this.depositBuffer, this.activityBuffer, ...trails]
 
     const uniform: GPUBufferBindingLayout = { type: 'uniform' }
     const readOnly: GPUBufferBindingLayout = { type: 'read-only-storage' }
@@ -178,6 +186,7 @@ export class Simulation {
         { binding: 1, visibility: COMPUTE, buffer: readOnly },
         { binding: 2, visibility: COMPUTE, buffer: readOnly },
         { binding: 3, visibility: COMPUTE, buffer: readWrite },
+        { binding: 4, visibility: COMPUTE, buffer: readWrite },
       ],
     })
     const renderLayout = device.createBindGroupLayout({
@@ -185,6 +194,7 @@ export class Simulation {
       entries: [
         { binding: 0, visibility: FRAGMENT, buffer: uniform },
         { binding: 1, visibility: FRAGMENT, buffer: readOnly },
+        { binding: 2, visibility: FRAGMENT, buffer: readOnly },
       ],
     })
 
@@ -241,6 +251,7 @@ export class Simulation {
           { binding: 1, resource: { buffer: trails[n] } },
           { binding: 2, resource: { buffer: this.depositBuffer } },
           { binding: 3, resource: { buffer: trails[1 - n] } },
+          { binding: 4, resource: { buffer: this.activityBuffer } },
         ],
       }),
     )
@@ -250,6 +261,7 @@ export class Simulation {
         entries: [
           { binding: 0, resource: params },
           { binding: 1, resource: { buffer: trails[n] } },
+          { binding: 2, resource: { buffer: this.activityBuffer } },
         ],
       }),
     )
@@ -335,6 +347,7 @@ export class Simulation {
     this.writeParams()
     const encoder = this.device.createCommandEncoder({ label: 'init' })
     for (const trail of this.trails) encoder.clearBuffer(trail)
+    encoder.clearBuffer(this.activityBuffer)
     const pass = encoder.beginComputePass()
     pass.setPipeline(this.initPipeline)
     pass.setBindGroup(0, this.agentGroups[0])
@@ -398,7 +411,7 @@ export class Simulation {
     d.setFloat32(100, wounding ? 0 : feed, true)
     d.setFloat32(104, wounding ? 1 : 0, true)
     d.setFloat32(108, wounding ? WOUND_RADIUS : this.pointerRadius, true)
-    d.setFloat32(112, 0, true)
+    d.setFloat32(112, ACTIVITY_DECAY, true)
     d.setFloat32(116, 0, true)
     d.setFloat32(120, 0, true)
     this.device.queue.writeBuffer(this.paramsBuffer, 0, d.buffer)

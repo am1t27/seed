@@ -5,6 +5,7 @@
 @group(0) @binding(1) var<storage, read> trailIn: array<u32>;
 @group(0) @binding(2) var<storage, read> deposits: array<u32>;
 @group(0) @binding(3) var<storage, read_write> trailOut: array<u32>;
+@group(0) @binding(4) var<storage, read_write> activity: array<u32>;
 
 // Cap per cell so nine cells sum without overflowing u32 (9 * 2^28 < 2^32).
 const CELL_MAX: u32 = 268435456u;
@@ -42,4 +43,11 @@ fn diffuse(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
 
   trailOut[gid.y * params.gridW + gid.x] = u32(clamp(value, 0.0, f32(CELL_MAX)));
+
+  // The fast channel: where particles moved in roughly the last half second.
+  // Each invocation touches only its own cell, so updating in place is safe and
+  // no second buffer is needed.
+  let index = gid.y * params.gridW + gid.x;
+  let recent = f32(activity[index]) * params.activityDecay + f32(min(deposits[index], CELL_MAX >> 1u));
+  activity[index] = u32(min(recent, f32(CELL_MAX)));
 }

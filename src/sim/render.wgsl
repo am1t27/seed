@@ -4,6 +4,7 @@
 
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read> trail: array<u32>;
+@group(0) @binding(2) var<storage, read> activity: array<u32>;
 
 @vertex
 fn vertex(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
