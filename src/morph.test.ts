@@ -13,6 +13,7 @@ const form = (overrides: Partial<Form> = {}): Form => ({
   stepSize: 2,
   decay: 0.8,
   crowd: 12,
+  island: 0,
   exposure: 0.08,
   hue: 0,
   ...overrides,

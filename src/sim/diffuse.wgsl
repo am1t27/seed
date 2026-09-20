@@ -42,6 +42,17 @@ fn diffuse(@builtin(global_invocation_id) gid: vec3<u32>) {
     value *= 1.0 - shaped * params.pointerWound;
   }
 
+  // An optional soft edge, so the colony has a silhouette rather than filling
+  // the frame. Trail outside the edge dies faster instead of being cut off,
+  // which keeps the boundary organic rather than a hard circle.
+  if (params.islandEdge > 0.0) {
+    let grid = vec2<f32>(f32(params.gridW), f32(params.gridH));
+    let centred = vec2<f32>(f32(gid.x), f32(gid.y)) - grid * 0.5;
+    let radius = min(grid.x, grid.y) * 0.5 * params.islandEdge;
+    let r = length(centred) / max(radius, 1.0);
+    value *= 1.0 - smoothstep(0.85, 1.2, r) * 0.92;
+  }
+
   trailOut[gid.y * params.gridW + gid.x] = u32(clamp(value, 0.0, f32(CELL_MAX)));
 
   // The fast channel: where particles moved in roughly the last half second.

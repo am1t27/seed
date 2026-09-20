@@ -57,6 +57,10 @@ interface Family {
   headings: Form['heading'][]
   shapeSize: Range
   brightness?: number // thin-filament families need a lift to read on screen
+  // Colony radius as a share of the half grid; omit to fill the frame. 0.5 keeps
+  // the whole silhouette on a laptop screen, where the cover fit shows about half
+  // the grid's height; 0.62 ran off the top and bottom there.
+  island?: number
 }
 
 const DISC = 0
@@ -80,6 +84,7 @@ export const FAMILIES: Family[] = [
     headings: [INWARD],
     shapeSize: [0.38, 0.5],
     brightness: 1.6,
+    island: 0.5,
   },
   {
     // A braided ring that throws out bridges.
@@ -197,6 +202,7 @@ export const FAMILIES: Family[] = [
     shapes: [DISC],
     headings: [RANDOM],
     shapeSize: [0.24, 0.36],
+    island: 0.5,
   },
 ]
 
@@ -233,6 +239,7 @@ export function organismFor(rawWord: string): Organism {
       stepSize: within(family.stepSize),
       decay: within(family.decay),
       crowd,
+      island: family.island ?? 0,
       exposure: (within(BRIGHTNESS) * (family.brightness ?? 1)) / crowd,
       hue: next(),
     },
