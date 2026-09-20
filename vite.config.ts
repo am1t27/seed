@@ -1,6 +1,6 @@
 import { writeFile, mkdir } from 'node:fs/promises'
 import { dirname, resolve, sep } from 'node:path'
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, type Plugin } from 'vitest/config'
 
 // Dev server only: POST /__save?path=public/fallback.webm writes the request body
 // into the project. Used to store recordings and images captured from our own
@@ -39,4 +39,9 @@ function saveFromBrowser(): Plugin {
 
 export default defineConfig({
   plugins: [saveFromBrowser()],
+  test: {
+    // Node environment: every test here covers pure functions, no DOM needed.
+    environment: 'node',
+    include: ['src/**/*.test.ts'],
+  },
 })
