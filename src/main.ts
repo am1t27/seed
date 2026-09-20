@@ -40,7 +40,9 @@ const ui = createUi({
   onWord: (word) => grow(word),
   onSave: () => savePoster(),
 })
-let grow: (word: string) => void = () => undefined
+// A word typed before the GPU is ready is kept and grown as soon as it is.
+let queuedWord: string | null = null
+let grow: (word: string) => void = (word) => (queuedWord = word)
 let savePoster: () => Promise<void> = () => Promise.reject(new Error('not ready'))
 
 function fallback(reason: string): void {
@@ -111,15 +113,22 @@ async function benchmark(device: GPUDevice, format: GPUTextureFormat, form: Form
 
 // A link opened in a background tab gets a throttled GPU. Benchmarking then would
 // lock the visitor into the lowest tier, so wait until the tab is actually looked at.
-function whenVisible(): Promise<void> {
+// Some embedded browsers report hidden forever, so the wait is capped; a run that
+// started hidden is benchmarked again the first time the tab is seen.
+const VISIBLE_WAIT_MS = 3000
+
+function whenVisible(limitMs: number): Promise<void> {
   if (!document.hidden) return Promise.resolve()
   return new Promise((resolve) => {
-    const check = (): void => {
-      if (document.hidden) return
+    const done = (): void => {
       document.removeEventListener('visibilitychange', check)
       resolve()
     }
+    const check = (): void => {
+      if (!document.hidden) done()
+    }
     document.addEventListener('visibilitychange', check)
+    if (Number.isFinite(limitMs)) window.setTimeout(done, limitMs)
   })
 }
 
@@ -172,11 +181,13 @@ async function start(): Promise<void> {
 
   let tier = 0
   let benchMs = 0
+  let benchmarkedHidden = false
   let startupMs = 0
   let sim: Simulation
   try {
     const forcedTier = dev?.tierOverride(TIERS)
-    if (forcedTier === undefined) await whenVisible()
+    if (forcedTier === undefined) await whenVisible(VISIBLE_WAIT_MS)
+    const startedHidden = document.hidden
     const began = performance.now()
     if (!adapter.info.isFallbackAdapter && forcedTier === undefined) {
       benchMs = await benchmark(device, format, organism.form)
@@ -186,6 +197,7 @@ async function start(): Promise<void> {
     const settings: SimSettings = { grid: GRID, count: TIERS[tier] }
     sim = await Simulation.create(device, format, settings, organism.form)
     startupMs = performance.now() - began
+    benchmarkedHidden = startedHidden && forcedTier === undefined
   } catch (error) {
     console.error(error)
     return fallback(String(error))
@@ -209,6 +221,8 @@ async function start(): Promise<void> {
     ui.showWord(organism.word, true)
     history.replaceState(null, '', shareUrl(organism.word))
   }
+
+  if (queuedWord) grow(queuedWord)
 
   savePoster = async () => {
     const blob = await renderPoster(device, sim, posterSize(device, tier <= 1), organism.word)
@@ -243,23 +257,32 @@ async function start(): Promise<void> {
   let rebuilding = false
   let overlayAt = 0
 
-  const stepDown = async (): Promise<void> => {
+  // Swap to another particle tier, keeping the current word.
+  const rebuild = async (nextTier: number): Promise<void> => {
+    if (rebuilding || nextTier === tier) return
     rebuilding = true
     try {
       const next = await Simulation.create(
         device,
         format,
-        { grid: GRID, count: TIERS[tier - 1] },
+        { grid: GRID, count: TIERS[nextTier] },
         organism.form,
       )
       sim.destroy()
       sim = next
-      tier -= 1
+      tier = nextTier
       resize()
     } finally {
       slowFrames = 0
       rebuilding = false
     }
+  }
+
+  if (benchmarkedHidden) {
+    void whenVisible(Infinity).then(async () => {
+      benchMs = await benchmark(device, format, organism.form)
+      await rebuild(Math.max(tier, tierFor(benchMs)))
+    })
   }
 
   const stats = (): string =>
@@ -288,7 +311,7 @@ async function start(): Promise<void> {
 
     // Sustained slow frames while visible: quietly drop a tier. No warning is shown.
     slowFrames = smoothedMs > SLOW_FRAME_MS && !document.hidden ? slowFrames + 1 : 0
-    if (slowFrames > SLOW_FRAMES_BEFORE_STEP_DOWN && tier > 0 && !rebuilding) void stepDown()
+    if (slowFrames > SLOW_FRAMES_BEFORE_STEP_DOWN && tier > 0) void rebuild(tier - 1)
 
     if (!report.hidden && now - overlayAt > 250) {
       overlayAt = now
