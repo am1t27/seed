@@ -1,4 +1,4 @@
-// Fullscreen draw: read the trail buffer, fit the square grid over the canvas
+// Fullscreen draw: read the trail and activity buffers, fit the square grid over the canvas
 // ("cover"), filter by hand (a buffer has no sampler), map through the color ramp.
 // The glow is the trail's own diffused halo shown on a log-like curve, not a blur pass.
 
@@ -14,15 +14,18 @@ fn vertex(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
   return vec4<f32>(x, y, 0.0, 1.0);
 }
 
-fn cell(x: i32, y: i32) -> f32 {
+fn cell(x: i32, y: i32) -> vec2<f32> {
   let w = i32(params.gridW);
   let h = i32(params.gridH);
   let cx = ((x % w) + w) % w;
   let cy = ((y % h) + h) % h;
-  return f32(trail[u32(cy * w + cx)]) / TRAIL_SCALE;
+  let index = u32(cy * w + cx);
+  return vec2<f32>(f32(trail[index]), f32(activity[index])) / TRAIL_SCALE;
 }
 
-fn bilinear(g: vec2<f32>) -> f32 {
+// Both samplers return trail in x and activity in y, so the two channels are
+// filtered identically in one pass.
+fn bilinear(g: vec2<f32>) -> vec2<f32> {
   let base = floor(g);
   let f = g - base;
   let x = i32(base.x);
@@ -43,16 +46,16 @@ fn weights(t: f32) -> vec4<f32> {
   ) / 6.0;
 }
 
-fn bicubic(g: vec2<f32>) -> f32 {
+fn bicubic(g: vec2<f32>) -> vec2<f32> {
   let base = floor(g);
   let f = g - base;
   let wx = weights(f.x);
   let wy = weights(f.y);
   let x = i32(base.x);
   let y = i32(base.y);
-  var sum = 0.0;
+  var sum = vec2<f32>(0.0);
   for (var j = 0; j < 4; j++) {
-    var row = 0.0;
+    var row = vec2<f32>(0.0);
     for (var i = 0; i < 4; i++) {
       row += cell(x + i - 1, y + j - 1) * wx[i];
     }
@@ -72,23 +75,36 @@ fn fragment(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   let scale = max(canvas.x / grid.x, canvas.y / grid.y);
   let g = (frag.xy - canvas * 0.5) / scale + grid * 0.5 - vec2<f32>(0.5);
 
-  var value: f32;
+  var sampled: vec2<f32>;
   if (params.quality == 1u) {
-    value = bicubic(g);
+    sampled = bicubic(g);
   } else {
-    value = bilinear(g);
+    sampled = bilinear(g);
   }
+  let value = sampled.x;
+  // The fast channel keeps a fixed share per step while the trail's share is the
+  // family's decay, so their steady levels differ by a factor that depends on the
+  // family. Converting activity into trail-equivalent units first lets one
+  // multiplier suit every family; without it fast-decaying families saturate and
+  // flow turns into a flat whitening.
+  let equivalent = (1.0 - params.activityDecay) * params.decay / max(1.0 - params.decay, 0.01);
+  let motion = 1.0 - exp(-max(sampled.y, 0.0) * equivalent * params.exposure * 1.5);
 
-  // Three layers from one number: a wide faint halo, the filament body, a hot core.
+  // Four layers from two numbers: a wide faint halo, the filament body, a hot
+  // core, and the flow travelling along it.
   let halo = 1.0 - exp(-value * params.exposure * 7.0);
   let body = 1.0 - exp(-value * params.exposure);
   let core = body * body * body * body;
+  // Flow only shows where there is structure to carry it, so it is gated by body.
+  let flow = motion * motion * body;
 
   let deep = mix(vec3<f32>(0.02, 0.05, 0.22), vec3<f32>(0.0, 0.13, 0.12), params.hue);
   let glow = mix(vec3<f32>(0.08, 0.62, 0.98), vec3<f32>(0.12, 1.0, 0.55), params.hue);
   let hot = mix(vec3<f32>(0.80, 0.93, 1.0), vec3<f32>(0.86, 1.0, 0.88), params.hue);
+  let spark = mix(vec3<f32>(0.72, 0.90, 1.0), vec3<f32>(0.80, 1.0, 0.92), params.hue);
 
   var color = deep * halo * 0.55 + glow * pow(body, 1.35) * 0.85 + hot * core * 0.75;
+  color += spark * flow * 0.55;
   color *= params.fade;
 
   // Deep-water background with a slight vignette, so black never reads as a dead screen.
