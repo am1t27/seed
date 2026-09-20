@@ -1,6 +1,6 @@
 import { Simulation, type Form, type SimSettings } from './sim/simulation'
 import { organismFor, DEFAULT_WORD, type Organism } from './seed'
-import { createUi, shareUrl } from './ui'
+import { createUi, withoutWord } from './ui'
 import { download, posterFilename, posterSize, renderPoster } from './export'
 import { attachPointer } from './pointer'
 import { easeLook } from './morph'
@@ -240,7 +240,8 @@ async function start(): Promise<void> {
     organism = organismOf(word)
     sim.transitionTo(organism.form)
     ui.showWord(organism.word, true)
-    history.replaceState(null, '', shareUrl(organism.word))
+    // A word typed over a shared link replaces it, so the old word leaves the address too.
+    history.replaceState(null, '', withoutWord(location.href))
   }
 
   if (queuedWord) grow(queuedWord)

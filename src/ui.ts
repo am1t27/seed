@@ -23,6 +23,19 @@ export function shareUrl(word: string): string {
   return url.toString()
 }
 
+// The address with the word taken out and everything else left as written. A typed
+// word is never put in the address bar, so a refresh starts over from the default;
+// only a link someone chose to copy carries a word.
+export function withoutWord(href: string): string {
+  const url = new URL(href)
+  const kept = url.search
+    .slice(1)
+    .split('&')
+    .filter((part) => part !== '' && part !== 'w' && !part.startsWith('w='))
+  url.search = kept.length > 0 ? `?${kept.join('&')}` : ''
+  return url.toString()
+}
+
 export function createUi(handlers: UiHandlers): Ui {
   const form = $<HTMLFormElement>('word-form')
   const input = $<HTMLInputElement>('word')
