@@ -1,69 +1,73 @@
-import { Simulation, type SimSettings } from './sim/simulation'
+import { Simulation, type Form, type SimSettings } from './sim/simulation'
+import { organismFor, DEFAULT_WORD, type Organism } from './seed'
+import { createUi, shareUrl } from './ui'
+import { download, posterFilename, posterSize, renderPoster } from './export'
 
-// Get a WebGPU device, build the simulation, run the frame loop.
-// All four failure paths (no navigator.gpu, null adapter, rejected device,
-// device lost later) end in fallback(), which step 7 replaces with a video loop.
+// Get a WebGPU device, pick a particle count the machine can hold, run the frame loop.
+// All four failure paths (no navigator.gpu, null adapter, rejected device, device
+// lost later) end in the recorded video.
 
 const canvas = document.querySelector<HTMLCanvasElement>('#stage')!
+const recording = document.querySelector<HTMLVideoElement>('#recording')!
 const report = document.querySelector<HTMLPreElement>('#report')!
 
-// Limits the simulation will depend on. Logged now so step 4 can tier from them.
+const GRID = 1024
+// Particle tiers. The startup benchmark picks one; the frame loop can step down.
+const TIERS = [150_000, 300_000, 600_000, 1_000_000, 2_000_000]
+const BENCH_COUNT = 300_000
+const BENCH_WARM_STEPS = 8
+const BENCH_STEPS = 24
+// Share of a 16.7 ms frame the simulation step may use, leaving room for the draw.
+const STEP_BUDGET_MS = 6
+const STEP_MS = 1000 / 60
+const MAX_STEPS_PER_FRAME = 2
+const SLOW_FRAME_MS = 24
+const SLOW_FRAMES_BEFORE_STEP_DOWN = 150
+
 const LIMITS_OF_INTEREST = [
   'maxBufferSize',
   'maxStorageBufferBindingSize',
   'maxStorageBuffersPerShaderStage',
   'maxComputeInvocationsPerWorkgroup',
-  'maxComputeWorkgroupSizeX',
   'maxComputeWorkgroupsPerDimension',
   'maxTextureDimension2D',
 ] as const
 
-// Step 2: fixed by hand. Step 3 derives these from the word.
-const SETTINGS: SimSettings = {
-  grid: 1024,
-  count: 1_000_000,
-  seed: 1,
-  startShape: 0,
-  sensorAngle: (35 * Math.PI) / 180,
-  sensorDist: 30,
-  turnAngle: (12 * Math.PI) / 180,
-  stepSize: 2,
-  deposit: 1,
-  decay: 0.75,
-  exposure: 0.02,
-}
-
-// Dev server only: override any setting from the URL for hand tuning, for example
-// ?sensorDist=9&decay=0.85. Angles are in degrees here. Stripped from production.
-if (import.meta.env.DEV) {
-  const query = new URLSearchParams(location.search)
-  const degrees = new Set(['sensorAngle', 'turnAngle'])
-  for (const key of Object.keys(SETTINGS) as (keyof SimSettings)[]) {
-    const raw = query.get(key)
-    if (raw === null || Number.isNaN(Number(raw))) continue
-    const value = degrees.has(key) ? (Number(raw) * Math.PI) / 180 : Number(raw)
-    ;(SETTINGS as unknown as Record<string, number>)[key] = value
-  }
-}
-
-const STEP_MS = 1000 / 60
-const MAX_STEPS_PER_FRAME = 2
+const ui = createUi({
+  onWord: (word) => grow(word),
+  onSave: () => savePoster(),
+})
+let grow: (word: string) => void = () => undefined
+let savePoster: () => Promise<void> = () => Promise.reject(new Error('not ready'))
 
 function fallback(reason: string): void {
-  report.hidden = false
-  report.textContent = `WebGPU unavailable: ${reason}\n(The video fallback arrives in step 7.)`
+  console.warn(`Falling back to the recording: ${reason}`)
+  canvas.hidden = true
+  recording.hidden = false
+  // MP4 first: every Safari plays it. WebM covers browsers without H.264.
+  for (const [src, type] of [
+    ['/fallback.mp4', 'video/mp4'],
+    ['/fallback.webm', 'video/webm'],
+  ]) {
+    const source = document.createElement('source')
+    source.src = src
+    source.type = type
+    recording.append(source)
+  }
+  recording.play().catch(() => undefined)
+  ui.showRecording(
+    'This is a recording. Growing it live needs WebGPU: a current Chrome, Edge or Safari.',
+  )
+  report.textContent = `WebGPU unavailable: ${reason}`
 }
 
 function describe(adapter: GPUAdapter): string {
   const info = adapter.info
   const lines = [
-    'WebGPU ready',
-    '',
     `vendor        ${info.vendor || 'unknown'}`,
     `architecture  ${info.architecture || 'unknown'}`,
     `device        ${info.device || 'unknown'}`,
-    `description   ${info.description || 'unknown'}`,
-    `fallback      ${info.isFallbackAdapter ? 'yes (software, low tier)' : 'no'}`,
+    `fallback      ${info.isFallbackAdapter ? 'yes (software, lowest tier)' : 'no'}`,
     `canvas format ${navigator.gpu.getPreferredCanvasFormat()}`,
     '',
   ]
@@ -73,11 +77,24 @@ function describe(adapter: GPUAdapter): string {
   return lines.join('\n')
 }
 
-function resize(device: GPUDevice): void {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2)
-  const max = device.limits.maxTextureDimension2D
-  canvas.width = Math.max(1, Math.min(max, Math.floor(canvas.clientWidth * dpr)))
-  canvas.height = Math.max(1, Math.min(max, Math.floor(canvas.clientHeight * dpr)))
+// Time real simulation steps on this GPU and return milliseconds per step.
+async function benchmark(device: GPUDevice, format: GPUTextureFormat, form: Form): Promise<number> {
+  const probe = await Simulation.create(device, format, { grid: GRID, count: BENCH_COUNT }, form)
+  for (let i = 0; i < BENCH_WARM_STEPS; i++) probe.step()
+  await probe.idle()
+  const began = performance.now()
+  for (let i = 0; i < BENCH_STEPS; i++) probe.step()
+  await probe.idle()
+  const perStep = (performance.now() - began) / BENCH_STEPS
+  probe.destroy()
+  return perStep
+}
+
+function tierFor(msPerStep: number): number {
+  const affordable = BENCH_COUNT * (STEP_BUDGET_MS / Math.max(msPerStep, 0.05))
+  let tier = 0
+  for (let i = 0; i < TIERS.length; i++) if (TIERS[i] <= affordable) tier = i
+  return tier
 }
 
 async function start(): Promise<void> {
@@ -89,6 +106,7 @@ async function start(): Promise<void> {
 
   let device: GPUDevice
   try {
+    // Default limits are enough: the largest buffer is the 4096 poster readback at 67 MB.
     device = await adapter.requestDevice()
   } catch (error) {
     return fallback(`the device request was rejected (${String(error)})`)
@@ -105,45 +123,104 @@ async function start(): Promise<void> {
   const format = navigator.gpu.getPreferredCanvasFormat()
   context.configure({ device, format, alphaMode: 'opaque' })
 
-  const adapterReport = describe(adapter)
-  console.info(adapterReport)
+  const dev = import.meta.env.DEV ? await import('./dev') : null
+  const organismOf = (word: string): Organism => {
+    const organism = organismFor(word)
+    dev?.applyOverrides(organism.form)
+    return organism
+  }
 
+  const linked = new URLSearchParams(location.search).get('w')
+  let organism = organismOf(linked ?? DEFAULT_WORD)
+
+  let tier = 0
+  let benchMs = 0
+  let startupMs = 0
   let sim: Simulation
   try {
-    sim = await Simulation.create(device, format, SETTINGS)
+    const began = performance.now()
+    if (!adapter.info.isFallbackAdapter) {
+      benchMs = await benchmark(device, format, organism.form)
+      tier = tierFor(benchMs)
+    }
+    tier = dev?.tierOverride(TIERS) ?? tier
+    const settings: SimSettings = { grid: GRID, count: TIERS[tier] }
+    sim = await Simulation.create(device, format, settings, organism.form)
+    startupMs = performance.now() - began
   } catch (error) {
     console.error(error)
     return fallback(String(error))
   }
 
-  // Dev server only: ?warm=600 runs that many steps up front, to inspect a grown form.
-  if (import.meta.env.DEV) {
-    const warm = Number(new URLSearchParams(location.search).get('warm')) || 0
-    for (let i = 0; i < Math.min(warm, 5000); i++) sim.step()
-    // Draw and read back in one task; a WebGPU canvas is only readable before it presents.
-    Object.assign(window, {
-      __snapshot: () => {
-        sim.draw(context.getCurrentTexture().createView(), canvas.width, canvas.height)
-        return canvas.toDataURL('image/png')
-      },
-    })
+  const resize = (): void => {
+    // Lower tiers render fewer pixels too.
+    const dpr = Math.min(window.devicePixelRatio || 1, tier <= 1 ? 1.5 : 2)
+    const max = device.limits.maxTextureDimension2D
+    canvas.width = Math.max(1, Math.min(max, Math.floor(canvas.clientWidth * dpr)))
+    canvas.height = Math.max(1, Math.min(max, Math.floor(canvas.clientHeight * dpr)))
   }
-  const frozen = import.meta.env.DEV && new URLSearchParams(location.search).has('freeze')
+  resize()
+  window.addEventListener('resize', resize)
 
-  resize(device)
-  window.addEventListener('resize', () => resize(device))
+  ui.showWord(organism.word, linked !== null)
 
-  // Debug overlay: press the backquote key (`) to show frame time and adapter info.
-  report.hidden = true
+  grow = (word) => {
+    organism = organismOf(word)
+    sim.transitionTo(organism.form)
+    ui.showWord(organism.word, true)
+    history.replaceState(null, '', shareUrl(organism.word))
+  }
+
+  savePoster = async () => {
+    const blob = await renderPoster(device, sim, posterSize(device, tier <= 1), organism.word)
+    download(blob, posterFilename(organism.word))
+  }
+
+  // Debug overlay: press the backquote key (`) for frame time, tier and adapter info.
+  const adapterReport = describe(adapter)
   window.addEventListener('keydown', (event) => {
-    if (event.key === '`') report.hidden = !report.hidden
+    if (event.key !== '`') return
+    event.preventDefault()
+    report.hidden = !report.hidden
+  })
+
+  let stepsFrozen = false
+  dev?.install({
+    canvas,
+    device,
+    context,
+    getSim: () => sim,
+    getOrganism: () => organism,
+    grow: (word) => grow(word),
+    freeze: (on) => (stepsFrozen = on),
   })
 
   // Fixed 60 Hz simulation clock, so a 120 Hz display doesn't grow it twice as fast.
   let last = performance.now()
   let owed = 0
   let smoothedMs = STEP_MS
+  let slowFrames = 0
+  let rebuilding = false
   let overlayAt = 0
+
+  const stepDown = async (): Promise<void> => {
+    rebuilding = true
+    try {
+      const next = await Simulation.create(
+        device,
+        format,
+        { grid: GRID, count: TIERS[tier - 1] },
+        organism.form,
+      )
+      sim.destroy()
+      sim = next
+      tier -= 1
+      resize()
+    } finally {
+      slowFrames = 0
+      rebuilding = false
+    }
+  }
 
   const frame = (now: number): void => {
     if (!alive) return
@@ -153,7 +230,7 @@ async function start(): Promise<void> {
     owed += elapsed
 
     let steps = 0
-    while (!frozen && owed >= STEP_MS && steps < MAX_STEPS_PER_FRAME) {
+    while (!stepsFrozen && owed >= STEP_MS && steps < MAX_STEPS_PER_FRAME) {
       sim.step()
       owed -= STEP_MS
       steps += 1
@@ -162,12 +239,18 @@ async function start(): Promise<void> {
 
     sim.draw(context.getCurrentTexture().createView(), canvas.width, canvas.height)
 
+    // Sustained slow frames while visible: quietly drop a tier. No warning is shown.
+    slowFrames = smoothedMs > SLOW_FRAME_MS && !document.hidden ? slowFrames + 1 : 0
+    if (slowFrames > SLOW_FRAMES_BEFORE_STEP_DOWN && tier > 0 && !rebuilding) void stepDown()
+
     if (!report.hidden && now - overlayAt > 250) {
       overlayAt = now
       report.textContent =
         `frame ${smoothedMs.toFixed(1)} ms (${(1000 / smoothedMs).toFixed(0)} fps)\n` +
-        `particles ${SETTINGS.count.toLocaleString('en-US')}, grid ${SETTINGS.grid}, step ${sim.frameCount}\n` +
-        `canvas ${canvas.width} x ${canvas.height}\n\n${adapterReport}`
+        `particles ${TIERS[tier].toLocaleString('en-US')} (tier ${tier + 1} of ${TIERS.length}), grid ${GRID}, step ${sim.frameCount}\n` +
+        `benchmark ${benchMs.toFixed(2)} ms per step at ${BENCH_COUNT.toLocaleString('en-US')}, startup ${startupMs.toFixed(0)} ms\n` +
+        `canvas ${canvas.width} x ${canvas.height}\n` +
+        `word "${organism.word}", family ${organism.family}\n\n${adapterReport}`
     }
     requestAnimationFrame(frame)
   }
