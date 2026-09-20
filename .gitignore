@@ -26,3 +26,6 @@ dist-ssr
 # Local session notes
 .remember
 .claude
+
+# Dev measurement dumps
+docs/measure-*.txt

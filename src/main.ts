@@ -175,13 +175,14 @@ async function start(): Promise<void> {
   let startupMs = 0
   let sim: Simulation
   try {
-    await whenVisible()
+    const forcedTier = dev?.tierOverride(TIERS)
+    if (forcedTier === undefined) await whenVisible()
     const began = performance.now()
-    if (!adapter.info.isFallbackAdapter) {
+    if (!adapter.info.isFallbackAdapter && forcedTier === undefined) {
       benchMs = await benchmark(device, format, organism.form)
       tier = tierFor(benchMs)
     }
-    tier = dev?.tierOverride(TIERS) ?? tier
+    tier = forcedTier ?? tier
     const settings: SimSettings = { grid: GRID, count: TIERS[tier] }
     sim = await Simulation.create(device, format, settings, organism.form)
     startupMs = performance.now() - began
