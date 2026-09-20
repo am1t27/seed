@@ -1,18 +1,198 @@
+:root {
+  --ink: #d9f2e9;
+  --ink-soft: rgba(217, 242, 233, 0.62);
+  --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 html,
 body {
   margin: 0;
   height: 100%;
-  background: #03060a;
-  color: #b8d8d0;
+  background: #02050a;
+  color: var(--ink);
   overflow: hidden;
+  font-family: var(--serif);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
 
-#stage {
+#stage,
+#recording {
   position: fixed;
   inset: 0;
   width: 100%;
   height: 100%;
   display: block;
+  object-fit: cover;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* The input starts dead center. Once a word is grown it settles near the bottom,
+   so the organism has the screen. */
+#word-form {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(30rem, calc(100% - 3rem));
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: auto;
+  transition:
+    top 900ms var(--ease),
+    transform 900ms var(--ease);
+}
+
+/* A soft pool of shadow keeps the text readable over bright filaments. */
+#word-form::before {
+  content: '';
+  position: absolute;
+  inset: -3.5rem -5rem;
+  z-index: -1;
+  background: radial-gradient(closest-side, rgba(2, 5, 10, 0.78), rgba(2, 5, 10, 0));
+  pointer-events: none;
+}
+
+body[data-state='settled'] #word-form {
+  top: calc(100% - 9.25rem - env(safe-area-inset-bottom));
+  transform: translate(-50%, 0);
+}
+
+#word {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.35em 0.2em 0.4em;
+  border: 0;
+  border-bottom: 1px solid rgba(217, 242, 233, 0.34);
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  caret-color: #7dffd0;
+  font: italic 400 clamp(1.6rem, 4.2vw, 2.4rem) / 1.2 var(--serif);
+  text-align: center;
+  text-shadow: 0 0 18px rgba(2, 5, 10, 0.9);
+  transition:
+    border-color 300ms ease,
+    font-size 900ms var(--ease);
+}
+
+#word::placeholder {
+  color: var(--ink-soft);
+  opacity: 1;
+}
+
+#word:focus-visible {
+  border-bottom-color: rgba(125, 255, 208, 0.85);
+}
+
+body[data-state='settled'] #word {
+  font-size: clamp(1.15rem, 2.6vw, 1.4rem);
+}
+
+#hint {
+  margin: 0.9rem 0 0;
+  color: var(--ink-soft);
+  font: italic 400 0.95rem/1.4 var(--serif);
+  text-shadow: 0 0 14px rgba(2, 5, 10, 0.9);
+  transition: opacity 500ms ease;
+}
+
+body[data-state='settled'] #hint {
+  opacity: 0;
+  height: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+#plate {
+  position: absolute;
+  left: 50%;
+  bottom: calc(1.6rem + env(safe-area-inset-bottom));
+  width: min(34rem, calc(100% - 2rem));
+  transform: translateX(-50%);
+  text-align: center;
+  opacity: 0;
+  transition: opacity 900ms ease 500ms;
+}
+
+body[data-state='settled'] #plate {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#caption {
+  margin: 0;
+  color: var(--ink-soft);
+  font: italic 400 0.98rem/1.45 var(--serif);
+  text-shadow: 0 0 14px rgba(2, 5, 10, 0.95);
+  overflow-wrap: anywhere;
+}
+
+#caption em {
+  color: var(--ink);
+  font-style: italic;
+}
+
+#actions {
+  margin: 0.55rem 0 0;
+  display: flex;
+  justify-content: center;
+  gap: 1.6rem;
+}
+
+#actions button {
+  padding: 0.5rem 0.25rem;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font: italic 400 0.95rem/1 var(--serif);
+  text-decoration: underline;
+  text-decoration-color: rgba(217, 242, 233, 0.28);
+  text-underline-offset: 0.3em;
+  text-shadow: 0 0 14px rgba(2, 5, 10, 0.95);
+  cursor: pointer;
+  transition: color 200ms ease;
+}
+
+#actions button:hover,
+#actions button:focus-visible {
+  color: var(--ink);
+  outline: 0;
+  text-decoration-color: rgba(125, 255, 208, 0.8);
+}
+
+#actions button:disabled {
+  cursor: progress;
+  text-decoration: none;
+}
+
+/* No WebGPU: the recording plays and only the caption line remains. */
+body[data-state='recording'] #word-form,
+body[data-state='recording'] #actions {
+  display: none;
+}
+
+body[data-state='recording'] #plate {
+  opacity: 1;
 }
 
 #report {
@@ -23,11 +203,18 @@ body {
   max-height: calc(100% - 32px);
   margin: 0;
   overflow: auto;
+  color: #b8d8d0;
   font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: pre-wrap;
   pointer-events: none;
+  text-shadow: 0 0 6px #000;
 }
 
-#report[hidden] {
-  display: none;
+@media (prefers-reduced-motion: reduce) {
+  #word-form,
+  #word,
+  #plate,
+  #hint {
+    transition: none;
+  }
 }

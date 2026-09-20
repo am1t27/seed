@@ -2,14 +2,45 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#02050a" />
     <title>physarum-seed</title>
+    <meta name="description" content="Type a word and a million particles grow into an organism unique to it. Runs live on your GPU." />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
-  <body>
-    <canvas id="stage"></canvas>
-    <pre id="report" aria-live="polite"></pre>
+  <body data-state="intro">
+    <canvas id="stage" aria-label="A slime mold simulation growing in real time"></canvas>
+    <video id="recording" muted loop playsinline hidden></video>
+
+    <main id="ui">
+      <form id="word-form" autocomplete="off">
+        <label class="visually-hidden" for="word">Type a word</label>
+        <input
+          id="word"
+          name="word"
+          type="text"
+          inputmode="text"
+          enterkeyhint="go"
+          maxlength="40"
+          spellcheck="false"
+          autocapitalize="off"
+          autocorrect="off"
+          placeholder="type a word"
+        />
+        <p id="hint">every word grows its own organism</p>
+      </form>
+
+      <footer id="plate">
+        <p id="caption" aria-live="polite"></p>
+        <p id="actions">
+          <button id="save" type="button">save poster</button>
+          <button id="share" type="button">copy link</button>
+        </p>
+      </footer>
+    </main>
+
+    <pre id="report" hidden></pre>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

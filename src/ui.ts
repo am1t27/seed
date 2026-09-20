@@ -1,0 +1,109 @@
+import { normalizeWord } from './seed'
+
+// The input, the caption and the two actions. No framework: a handful of elements.
+
+export interface UiHandlers {
+  onWord(word: string): void
+  onSave(): Promise<void>
+}
+
+export interface Ui {
+  showWord(word: string, settled: boolean): void
+  showRecording(message: string): void
+}
+
+const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
+
+export function shareUrl(word: string): string {
+  const url = new URL(location.href)
+  url.search = ''
+  url.hash = ''
+  url.searchParams.set('w', word)
+  return url.toString()
+}
+
+export function createUi(handlers: UiHandlers): Ui {
+  const form = $<HTMLFormElement>('word-form')
+  const input = $<HTMLInputElement>('word')
+  const caption = $<HTMLParagraphElement>('caption')
+  const save = $<HTMLButtonElement>('save')
+  const share = $<HTMLButtonElement>('share')
+  let current = ''
+
+  const flash = (button: HTMLButtonElement, text: string): void => {
+    const original = button.dataset.label ?? button.textContent ?? ''
+    button.dataset.label = original
+    button.textContent = text
+    window.setTimeout(() => (button.textContent = original), 1800)
+  }
+
+  const showWord = (word: string, settled: boolean): void => {
+    current = word
+    // textContent only: the word comes from the URL, so it never touches innerHTML.
+    const name = document.createElement('em')
+    name.textContent = word
+    caption.replaceChildren('grown from the word ', name)
+    if (settled) {
+      document.body.dataset.state = 'settled'
+      input.placeholder = 'type another word'
+    }
+  }
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault()
+    const word = normalizeWord(input.value)
+    if (!word) return
+    input.value = ''
+    // On touch screens, drop the keyboard so the organism is visible.
+    if (matchMedia('(pointer: coarse)').matches) input.blur()
+    handlers.onWord(word)
+  })
+
+  save.addEventListener('click', () => {
+    save.disabled = true
+    save.textContent = 'rendering the poster'
+    handlers
+      .onSave()
+      .then(() => (save.textContent = 'poster saved'))
+      .catch((error) => {
+        console.error(error)
+        save.textContent = 'the poster failed, try again'
+      })
+      .finally(() => {
+        save.disabled = false
+        window.setTimeout(() => (save.textContent = 'save poster'), 2200)
+      })
+  })
+
+  share.addEventListener('click', () => {
+    const url = shareUrl(current)
+    // Phones get the native share sheet; everything else copies the link.
+    if (navigator.share && matchMedia('(pointer: coarse)').matches) {
+      navigator.share({ title: document.title, url }).catch(() => undefined)
+      return
+    }
+    navigator.clipboard
+      .writeText(url)
+      .then(() => flash(share, 'link copied'))
+      .catch(() => window.prompt('Copy this link', url))
+  })
+
+  // Desktop: typing anywhere lands in the input. Touch: no autofocus, no surprise keyboard.
+  if (matchMedia('(pointer: fine)').matches) {
+    input.focus({ preventScroll: true })
+    window.addEventListener('keydown', (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      if (event.key.length === 1 && event.key !== '`' && document.activeElement !== input) {
+        input.focus({ preventScroll: true })
+      }
+    })
+  }
+
+  return {
+    showWord,
+    showRecording(message: string): void {
+      document.body.dataset.state = 'recording'
+      caption.textContent = message
+    },
+  }
+}
