@@ -16,6 +16,7 @@ export const LOOK_KEYS = [
   'crowd',
   'exposure',
   'hue',
+  'modulation',
 ] as const
 
 export type LookKey = (typeof LOOK_KEYS)[number]

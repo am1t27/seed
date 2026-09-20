@@ -54,6 +54,7 @@ describe('easeLook', () => {
       crowd: 25,
       exposure: 0.2,
       hue: 1,
+      modulation: 0.4,
     })
     easeLook(current, target, 1)
     for (const key of LOOK_KEYS) {

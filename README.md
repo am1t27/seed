@@ -24,6 +24,17 @@ One addition to the classic rules: attraction rises with trail amount up to a
 threshold and then falls. Without it, a million particles collapse into a few thick
 lines and every word looks alike. `NOTES.md` has the sweep that found this.
 
+Two further departures from the base model. Each particle varies its own sensor
+distance, sensor angle, turn angle and step size according to the trail value it
+senses locally, so one image carries fine detail where the network is crowded
+and long reaching filaments where it is empty. And the pointer injects trail
+directly into the field, so dragging feeds the organism and a click tears a hole
+it then grows back into.
+
+A second, fast-decaying buffer records where particles moved in roughly the last
+half second. The renderer draws it as a brighter highlight on top of the slow
+trail, which is what makes flow along the filaments visible.
+
 ### The GPU side
 
 Raw WebGPU, no engine, zero runtime dependencies. Vite and TypeScript.
@@ -51,6 +62,17 @@ match visually, **not pixel for pixel**. WGSL specifies error bounds for float m
 permits reassociation ([WGSL 15.7.5](https://www.w3.org/TR/WGSL/#floating-point-accuracy)),
 so `sin` and `cos` differ slightly between GPUs, and a chaotic system amplifies that.
 Lower particle tiers also thin the organism while keeping its form.
+
+Touching the organism breaks this by design. A fed or wounded organism is no
+longer purely a function of its word. The share link is unaffected, because it
+always grows from step zero and pointer input is never encoded in it.
+
+When nobody touches it for four seconds of simulation, an invisible attractant
+drifts across the field so the organism never sits still. That drift is timed by
+the step count and not by the clock, so it follows the same path on every visit
+and an untouched word stays reproducible. Typing reshapes the organism live, but
+pressing Enter always regrows from step zero, so the typed path never leaks into
+the committed result.
 
 ## Measured performance
 
@@ -101,5 +123,7 @@ Output goes to `dist/`. It is a static site and deploys anywhere.
   approximations of Physarum transport networks", Artificial Life 16(2), 2010.
 - Hash: Jarzynski and Olano, "Hash Functions for GPU Rendering", JCGT 9(3), 2020.
 - Parameter ranges were cross-checked against [fogleman/physarum](https://github.com/fogleman/physarum) (MIT).
+- Per-particle parameter modulation follows an idea described by Sage Jenson.
+  No source was published for it, so the implementation here is our own.
 - All WGSL and TypeScript here was written for this project. No code was copied from
   the GPL or CC BY-NC-SA Physarum implementations.

@@ -57,11 +57,15 @@ interface Family {
   headings: Form['heading'][]
   shapeSize: Range
   brightness?: number // thin-filament families need a lift to read on screen
-  // Colony radius as a share of the half grid; omit to fill the frame. 0.5 keeps
+  // Colony radius as a share of the half grid; omit to fill the frame. Only veins
+  // uses it: on urchin it held every particle in a ball and the spines, which are
+  // the point of that family, never formed. 0.5 keeps
   // the whole silhouette on a laptop screen, where the cover fit shows about half
   // the grid's height; 0.62 ran off the top and bottom there.
   island?: number
-  modulation?: number // per-particle parameter variation; set per family after a sweep
+  // Per-particle parameter variation, 0 to 1. Set per family from a sweep of 0 to 1
+  // in steps of 0.2; NOTES.md has the ceilings. Families without it looked better fixed.
+  modulation?: number
 }
 
 const DISC = 0
@@ -84,6 +88,7 @@ export const FAMILIES: Family[] = [
     shapes: [DISC],
     headings: [INWARD],
     shapeSize: [0.38, 0.5],
+    modulation: 0.4,
     brightness: 1.6,
     island: 0.5,
   },
@@ -99,6 +104,7 @@ export const FAMILIES: Family[] = [
     shapes: [RING],
     headings: [TANGENT],
     shapeSize: [0.45, 0.7],
+    modulation: 0.4,
   },
   {
     // Long crossing threads, like pulled silk.
@@ -112,6 +118,7 @@ export const FAMILIES: Family[] = [
     shapes: [SCATTER],
     headings: [RANDOM],
     shapeSize: [1, 1],
+    modulation: 0.2,
   },
   {
     // Fat-walled cells.
@@ -151,6 +158,7 @@ export const FAMILIES: Family[] = [
     shapes: [SCATTER],
     headings: [RANDOM],
     shapeSize: [1, 1],
+    modulation: 0.4,
   },
   {
     // Crisp thin-walled polygons.
@@ -164,6 +172,7 @@ export const FAMILIES: Family[] = [
     shapes: [SCATTER, RING],
     headings: [RANDOM, INWARD],
     shapeSize: [0.55, 0.75],
+    modulation: 0.4,
   },
   {
     // Slow folded sheets, like smoke under water.
@@ -177,6 +186,7 @@ export const FAMILIES: Family[] = [
     shapes: [SCATTER],
     headings: [RANDOM],
     shapeSize: [1, 1],
+    modulation: 0.2,
   },
   {
     // A ragged, restless lattice.
@@ -203,7 +213,6 @@ export const FAMILIES: Family[] = [
     shapes: [DISC],
     headings: [RANDOM],
     shapeSize: [0.24, 0.36],
-    island: 0.5,
   },
 ]
 
