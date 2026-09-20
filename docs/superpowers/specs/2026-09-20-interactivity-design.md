@@ -5,7 +5,7 @@ grows an organism from a typed word and lets you save a poster. It has no
 interaction beyond the text input, and most families render as flat texture
 rather than as a living thing.
 
-This design adds seven features in three phases. Each phase ends in a working,
+This design adds eight features in three phases. Each phase ends in a working,
 committed, verifiable state.
 
 ## Goals
@@ -17,6 +17,8 @@ committed, verifiable state.
 5. Two words can share one arena and compete.
 6. The takeaway is a short video loop, not only a still.
 7. Other words are visible, so "every word is different" is provable on sight.
+8. Every family looks multi-scale rather than flat, because each particle runs
+   its own parameters rather than the population's.
 
 ## Non-goals
 
@@ -157,6 +159,43 @@ pass, a few operations per cell in diffuse.
 step count, filaments show visible directional movement. Frame time stays
 within one millisecond at the same tier on the M2.
 
+### 8. Per-particle parameter modulation
+
+Each particle varies its own sensor distance, sensor angle, turn angle and step
+size according to the trail value it senses locally, instead of every particle
+in the population sharing one fixed set.
+
+**Why.** A fixed parameter run produces structure at one scale, which is why
+the current build reads as an even texture. Modulating per particle produces
+fine detail inside dense regions and broad reaching filaments in empty ones, in
+the same image. This is the main difference between an ordinary Physarum run
+and the images most people have seen and admired.
+
+**Approach.** In `step`, after sensing, compute a local intensity from the
+sensed values, normalized against the family's crowding value so it stays in
+roughly 0 to 1. Each of the four parameters becomes
+`base * (1 + modulation * (intensity - 0.5) * 2)`, with a per-family
+`modulation` amount from 0 to 1 and a clamp on each result so nothing goes
+negative or explodes. A `modulation` of 0 reproduces today's behavior exactly,
+which keeps this testable against the current build.
+
+**Provenance.** Sage Jenson described this idea; his source was never released,
+and the re-implementations of it are CC BY-NC-SA and therefore off limits. This
+is written from the description, in our own WGSL. The README credits the idea.
+
+**Where it sits.** Last in phase one, before name mode and two species. It
+changes how every family looks, so the ten families need their ranges
+re-checked against the contact sheet once. Doing it after phase two would mean
+re-tuning twice, once for one species and again for two.
+
+**Cost.** A dozen extra instructions per particle per step, no new buffer, no
+new pass. Some frame time cost at high tiers; measure and record it.
+
+**Verification.** With `modulation` at 0, output is byte-identical to the
+previous commit for the same word. With it on, a contact sheet of the same ten
+words shows visible detail at more than one scale, and all ten still look
+different from each other.
+
 ## Phase two: the flex
 
 ### 4. Name mode
@@ -273,9 +312,9 @@ changes have to be published.
 This is the first runtime dependency in the project, so the README claim of
 "zero runtime dependencies" becomes false and must be corrected in the same
 commit. That is the cost of this feature and it is worth naming plainly.
-`canvas-record` (MIT) wraps the same tier selection and supports WebGPU
-canvases; it is the alternative if the MPL term is unwelcome, at the price of a
-larger dependency tree.
+Decided: take Mediabunny and correct the README. `canvas-record` (MIT) wraps
+the same tier selection and supports WebGPU canvases, and stays on record as
+the alternative, at the price of a larger dependency tree.
 
 **WebGPU specific hazard.** A canvas presentation texture is destroyed at the
 end of the animation frame that produced it. The recording context must be
@@ -377,13 +416,20 @@ reports meaningless numbers.
   codebase.
 - **Feature 6 adds the project's first runtime dependency**, which invalidates a
   claim the README currently makes. Correct the claim in the same commit.
+- **Per-particle modulation invalidates the family tuning.** The ten families
+  were swept by eye with fixed parameters. Feature 8 changes what those ranges
+  produce, so the contact sheet has to be re-run and some ranges will move. The
+  `modulation` amount defaults to 0 per family until each one has been looked
+  at, so the feature lands dark and is switched on family by family.
 - **Everything is still unverified off the M2.** The PC, a phone and Safari
   remain unmeasured, and the README must keep saying so.
 
 ## Sequencing
 
-Features ship in the order they are numbered above: 1, 2 and 3 in phase one, 4
-and 5 in phase two, 6 and 7 in phase three. Each feature is its own commit under Amit's git identity, pushed to
+Features ship in this order: 1, 2, 3 and 8 in phase one, then 4 and 5 in phase
+two, then 6 and 7 in phase three. Feature 8 keeps its number for continuity
+with the discussion that produced it, and runs last in phase one because it
+changes how every family looks and the families should only be re-tuned once. Each feature is its own commit under Amit's git identity, pushed to
 `am1t27/seed`, with no AI attribution in the message.
 
 ## References and licensing
@@ -439,16 +485,6 @@ about pieces that did spread, and it is correlational. It is enough to order
 the work and not enough to make a promise about outcomes.
 
 ## Considered and not included
-
-**Per-particle parameter modulation.** Sage Jenson's later work varies sensor
-distance, sensor angle, turn angle and step size per particle from the locally
-sensed trail value, rather than holding them fixed for the whole population.
-This is the main reason his images have a multi-scale quality that a fixed
-parameter run does not. It is a small change to `agents.wgsl` and would make
-every family look more sophisticated.
-
-It is not in the approved seven, so it is recorded here rather than added. It
-would be a strong candidate for an eighth feature.
 
 **Shared global state**, where every visitor sees the same field. It spreads
 well, needs a server, attracts bots quickly, and contradicts this project's
