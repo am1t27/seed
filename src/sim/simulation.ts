@@ -287,8 +287,9 @@ export class Simulation {
   }
 
   private inGrid(x: number, y: number): boolean {
+    // Cell centres sit at whole numbers, so the field spans -0.5 to grid - 0.5.
     const grid = this.settings.grid
-    return x >= 0 && y >= 0 && x < grid && y < grid
+    return x >= -0.5 && y >= -0.5 && x <= grid - 0.5 && y <= grid - 0.5
   }
 
   // Cut straight to a form with no entrance (first load, tier change).

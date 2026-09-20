@@ -2,6 +2,7 @@ import { Simulation, type Form, type SimSettings } from './sim/simulation'
 import { organismFor, DEFAULT_WORD, type Organism } from './seed'
 import { createUi, shareUrl } from './ui'
 import { download, posterFilename, posterSize, renderPoster } from './export'
+import { attachPointer } from './pointer'
 
 // Get a WebGPU device, pick a particle count the machine can hold, run the frame loop.
 // All four failure paths (no navigator.gpu, null adapter, rejected device, device
@@ -26,6 +27,10 @@ const STEP_MS = 1000 / 60
 const MAX_STEPS_PER_FRAME = 2
 const SLOW_FRAME_MS = 24
 const SLOW_FRAMES_BEFORE_STEP_DOWN = 150
+// After this long with no input, an invisible attractant wanders the field so
+// the organism is never completely still.
+const IDLE_AFTER_MS = 4000
+const IDLE_STRENGTH = 0.22
 
 const LIMITS_OF_INTEREST = [
   'maxBufferSize',
@@ -215,6 +220,13 @@ async function start(): Promise<void> {
 
   ui.showWord(organism.word, linked !== null)
 
+  let lastInputAt = performance.now()
+  attachPointer(canvas, GRID, {
+    feed: (x, y, strength) => sim.setPointer(x, y, strength),
+    wound: (x, y) => sim.wound(x, y),
+    touched: () => (lastInputAt = performance.now()),
+  })
+
   grow = (word) => {
     organism = organismOf(word)
     sim.transitionTo(organism.form)
@@ -306,6 +318,17 @@ async function start(): Promise<void> {
       steps += 1
     }
     if (owed > STEP_MS) owed = 0 // too far behind: drop the debt instead of spiralling
+
+    // Idle drift. A Lissajous path never repeats on a short cycle, so the
+    // organism keeps reorganizing instead of settling into one shape.
+    if (now - lastInputAt > IDLE_AFTER_MS) {
+      const t = now / 1000
+      sim.setPointer(
+        GRID * (0.5 + 0.3 * Math.sin(t * 0.21)),
+        GRID * (0.5 + 0.3 * Math.sin(t * 0.13 + 1.7)),
+        IDLE_STRENGTH,
+      )
+    }
 
     sim.draw(context.getCurrentTexture().createView(), canvas.width, canvas.height)
 
