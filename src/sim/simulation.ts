@@ -300,6 +300,17 @@ export class Simulation {
     return x >= -0.5 && y >= -0.5 && x <= grid - 0.5 && y <= grid - 0.5
   }
 
+  // Replace the parameters that decide the form, leaving the arrangement alone.
+  // Used while typing, so the organism reshapes without restarting.
+  setLook(form: Form): void {
+    const { seed, startShape, heading, shapeSize } = this.form
+    this.form = { ...form, seed, startShape, heading, shapeSize }
+  }
+
+  get look(): Form {
+    return this.form
+  }
+
   // Cut straight to a form with no entrance (first load, tier change).
   reset(form: Form): void {
     this.form = form

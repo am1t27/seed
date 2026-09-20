@@ -4,6 +4,7 @@ import { normalizeWord } from './seed'
 
 export interface UiHandlers {
   onWord(word: string): void
+  onType(word: string): void
   onSave(): Promise<void>
 }
 
@@ -48,6 +49,9 @@ export function createUi(handlers: UiHandlers): Ui {
       input.placeholder = 'type another word'
     }
   }
+
+  // Every keystroke, not only submit: the organism reshapes as the word is typed.
+  input.addEventListener('input', () => handlers.onType(normalizeWord(input.value)))
 
   form.addEventListener('submit', (event) => {
     event.preventDefault()

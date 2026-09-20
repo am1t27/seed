@@ -3,6 +3,7 @@ import { organismFor, DEFAULT_WORD, type Organism } from './seed'
 import { createUi, shareUrl } from './ui'
 import { download, posterFilename, posterSize, renderPoster } from './export'
 import { attachPointer } from './pointer'
+import { easeLook } from './morph'
 
 // Get a WebGPU device, pick a particle count the machine can hold, run the frame loop.
 // All four failure paths (no navigator.gpu, null adapter, rejected device, device
@@ -27,6 +28,8 @@ const STEP_MS = 1000 / 60
 const MAX_STEPS_PER_FRAME = 2
 const SLOW_FRAME_MS = 24
 const SLOW_FRAMES_BEFORE_STEP_DOWN = 150
+// Share of the remaining distance the look covers each frame while typing.
+const MORPH_RATE = 0.12
 
 const LIMITS_OF_INTEREST = [
   'maxBufferSize',
@@ -39,11 +42,14 @@ const LIMITS_OF_INTEREST = [
 
 const ui = createUi({
   onWord: (word) => grow(word),
+  onType: (word) => typeTarget(word),
   onSave: () => savePoster(),
 })
 // A word typed before the GPU is ready is kept and grown as soon as it is.
 let queuedWord: string | null = null
 let grow: (word: string) => void = (word) => (queuedWord = word)
+// Typed characters before the GPU is ready are ignored; the committed word is queued instead.
+let typeTarget: (word: string) => void = () => undefined
 let savePoster: () => Promise<void> = () => Promise.reject(new Error('not ready'))
 
 function fallback(reason: string): void {
@@ -223,7 +229,14 @@ async function start(): Promise<void> {
     touched: () => sim.touch(),
   })
 
+  let morphTo: Form | null = null
+  typeTarget = (word) => {
+    // An emptied input eases back to the word that is actually growing.
+    morphTo = (word ? organismOf(word) : organism).form
+  }
+
   grow = (word) => {
+    morphTo = null
     organism = organismOf(word)
     sim.transitionTo(organism.form)
     ui.showWord(organism.word, true)
@@ -314,6 +327,12 @@ async function start(): Promise<void> {
       steps += 1
     }
     if (owed > STEP_MS) owed = 0 // too far behind: drop the debt instead of spiralling
+
+    if (morphTo) {
+      const live = { ...sim.look }
+      easeLook(live, morphTo, MORPH_RATE)
+      sim.setLook(live)
+    }
 
     sim.draw(context.getCurrentTexture().createView(), canvas.width, canvas.height)
 
