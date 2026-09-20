@@ -35,7 +35,6 @@ const MAX_GROUPS_PER_ROW = 32768
 // count; a phone's organism is sparser but not dimmer than a desktop's.
 const REFERENCE_COUNT = 1_000_000
 const GATHER_STEPS = 50
-const GATHER_RATE = 0.09
 const GATHER_DECAY = 0.82
 const FADE_IN_STEPS = 45
 
@@ -319,7 +318,9 @@ export class Simulation {
     d.setFloat32(60, look.exposure, true)
     d.setFloat32(64, look.hue, true)
     d.setFloat32(68, fade, true)
-    d.setFloat32(72, GATHER_RATE, true)
+    // Ease in: particles peel away slowly, then rush, so the streaming is visible.
+    const progress = 1 - this.gatherLeft / GATHER_STEPS
+    d.setFloat32(72, 0.012 + 0.2 * progress * progress, true)
     d.setUint32(76, quality, true)
     d.setUint32(80, f.heading, true)
     d.setFloat32(84, f.shapeSize, true)

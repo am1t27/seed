@@ -79,7 +79,7 @@ export const FAMILIES: Family[] = [
     shapes: [DISC],
     headings: [INWARD],
     shapeSize: [0.38, 0.5],
-    brightness: 2.2,
+    brightness: 1.6,
   },
   {
     // A braided ring that throws out bridges.

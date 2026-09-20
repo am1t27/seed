@@ -95,7 +95,10 @@ fn fragment(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   let vignette = 1.0 - smoothstep(0.15, 0.75, length(uv));
   color += vec3<f32>(0.006, 0.013, 0.024) * (0.35 + 0.65 * vignette);
 
-  // A little noise hides banding in the dark gradients.
-  color += (noise(frag.xy) - 0.5) / 255.0;
+  // A little noise hides banding in the dark gradients on screen. The poster skips
+  // it: noise is incompressible and would triple the PNG's size.
+  if (params.quality == 0u) {
+    color += (noise(frag.xy) - 0.5) / 255.0;
+  }
   return vec4<f32>(max(color, vec3<f32>(0.0)), 1.0);
 }

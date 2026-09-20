@@ -59,6 +59,13 @@ export function createUi(handlers: UiHandlers): Ui {
     handlers.onWord(word)
   })
 
+  // Implicit submission on Enter is not reliable in every embedded browser, so ask for it.
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.isComposing) return
+    event.preventDefault()
+    form.requestSubmit()
+  })
+
   save.addEventListener('click', () => {
     save.disabled = true
     save.textContent = 'rendering the poster'
