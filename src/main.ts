@@ -57,11 +57,23 @@ function fallback(reason: string): void {
     source.type = type
     recording.append(source)
   }
-  recording.play().catch(() => undefined)
+  // The element was created without sources, so it has to be told to look again.
+  const play = (): void => void recording.play().catch(() => undefined)
+  recording.muted = true
+  recording.load()
+  recording.addEventListener('canplay', play, { once: true })
+  document.addEventListener('visibilitychange', () => !document.hidden && recording.paused && play())
   ui.showRecording(
     'This is a recording. Growing it live needs WebGPU: a current Chrome, Edge or Safari.',
   )
   report.textContent = `WebGPU unavailable: ${reason}`
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('measure')) {
+    // Rehearsal check: report whether the recording actually autoplayed.
+    setTimeout(() => {
+      const state = `paused ${recording.paused}, time ${recording.currentTime.toFixed(1)}, hidden ${document.hidden}, src ${recording.currentSrc}`
+      void fetch('/__save?path=docs/measure-fallback.txt', { method: 'POST', body: state })
+    }, 5000)
+  }
 }
 
 function describe(adapter: GPUAdapter): string {
@@ -119,6 +131,10 @@ function tierFor(msPerStep: number): number {
 }
 
 async function start(): Promise<void> {
+  // Dev server only: ?nogpu rehearses the fallback without touching browser flags.
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('nogpu')) {
+    return fallback('forced by ?nogpu')
+  }
   if (!('gpu' in navigator)) return fallback('navigator.gpu is missing in this browser')
 
   // requestAdapter resolves to null instead of throwing when nothing suitable exists.
