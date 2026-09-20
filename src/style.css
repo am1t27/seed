@@ -46,6 +46,25 @@ body {
   pointer-events: none;
 }
 
+/* A scrim under the settled input and caption, so they stay readable over bright filaments. */
+#ui::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 16rem;
+  background: linear-gradient(to top, rgba(2, 5, 10, 0.82), rgba(2, 5, 10, 0.5) 45%, rgba(2, 5, 10, 0));
+  opacity: 0;
+  transition: opacity 900ms ease;
+  z-index: -1;
+}
+
+body[data-state='settled'] #ui::after,
+body[data-state='recording'] #ui::after {
+  opacity: 1;
+}
+
 /* The input starts dead center. Once a word is grown it settles near the bottom,
    so the organism has the screen. */
 #word-form {

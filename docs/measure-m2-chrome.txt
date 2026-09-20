@@ -1,0 +1,6 @@
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36
+frame 16.7 ms (60 fps)
+particles 1,000,000 (tier 4 of 5), grid 1024, step 719
+benchmark 2.18 ms per step at 300,000, startup 125 ms
+canvas 2940 x 1492
+word "physarum", family lace

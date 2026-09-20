@@ -35,6 +35,7 @@ interface Hooks {
   getOrganism(): Organism
   grow(word: string): void
   freeze(on: boolean): void
+  stats(): string
 }
 
 export function install(hooks: Hooks): void {
@@ -100,5 +101,53 @@ export function install(hooks: Hooks): void {
     }
   }
 
-  Object.assign(window, { __dev: { ...hooks, snapshot, save, sheet } })
+  // Record the fallback loop from our own canvas. Grows each word for `seconds`,
+  // then starts one more entrance and stops at its darkest point, so the loop
+  // restarts from black. Saves public/fallback.<ext>.
+  const record = async (words: string[], seconds = 6): Promise<string> => {
+    const types = ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm']
+    const wanted = query.get('format') === 'webm' ? types.slice(1) : types
+    const mimeType = wanted.find((type) => MediaRecorder.isTypeSupported(type))
+    if (!mimeType) return 'no supported recording format'
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    hooks.canvas.style.cssText = `width:${1280 / dpr}px;height:${720 / dpr}px;inset:0 auto auto 0`
+    window.dispatchEvent(new Event('resize'))
+    const wait = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms))
+
+    const { organismFor } = await import('./seed')
+    hooks.getSim().reset(organismFor(words[0]).form)
+    const recorder = new MediaRecorder(hooks.canvas.captureStream(60), {
+      mimeType,
+      videoBitsPerSecond: 3_000_000,
+    })
+    const chunks: Blob[] = []
+    recorder.ondataavailable = (event) => chunks.push(event.data)
+    const stopped = new Promise((done) => (recorder.onstop = done))
+    recorder.start()
+    await wait(seconds * 1000)
+    for (const word of words.slice(1)) {
+      hooks.getSim().transitionTo(organismFor(word).form)
+      await wait(seconds * 1000)
+    }
+    hooks.getSim().transitionTo(organismFor(words[0]).form)
+    await wait(780) // just short of the 50-step entrance: the frame is near black
+    recorder.stop()
+    await stopped
+    const extension = mimeType.startsWith('video/mp4') ? 'mp4' : 'webm'
+    return save(`public/fallback.${extension}`, new Blob(chunks, { type: mimeType }))
+  }
+
+  // ?record=physarum,ocean,mother records the fallback loop without console access.
+  // ?measure=m2-chrome saves the overlay numbers to docs/measure-<name>.txt after 12 s.
+  const autoRecord = query.get('record')
+  if (autoRecord) void record(autoRecord.split(',')).then((result) => (document.title = result))
+  const measure = query.get('measure')
+  if (measure) {
+    setTimeout(() => {
+      const body = new Blob([`${navigator.userAgent}\n${hooks.stats()}\n`])
+      void save(`docs/measure-${measure}.txt`, body).then((result) => (document.title = result))
+    }, 12_000)
+  }
+
+  Object.assign(window, { __dev: { ...hooks, snapshot, save, sheet, record } })
 }
