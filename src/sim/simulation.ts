@@ -3,27 +3,42 @@ import agentsWgsl from './agents.wgsl?raw'
 import diffuseWgsl from './diffuse.wgsl?raw'
 import renderWgsl from './render.wgsl?raw'
 
-// Step 2 values, fixed by hand. Step 3 replaces these with the word's hash.
-export interface SimSettings {
-  grid: number
-  count: number
+// Everything the word decides. seed.ts builds one of these from the word's hash.
+export interface Form {
   seed: number
-  startShape: 0 | 1 | 2
+  startShape: 0 | 1 | 2 // disc, ring, scatter
+  heading: 0 | 1 | 2 | 3 // inward, outward, random, tangent
+  shapeSize: number // start shape radius, share of the half grid
   sensorAngle: number // radians
   sensorDist: number // grid cells
   turnAngle: number // radians
   stepSize: number // grid cells per step
-  deposit: number // trail amount per particle per step
   decay: number // trail kept per step, 0..1
+  crowd: number // trail amount where attraction peaks
   exposure: number
+  hue: number // 0 blue .. 1 green
+}
+
+// Everything the device decides.
+export interface SimSettings {
+  grid: number
+  count: number
 }
 
 const TRAIL_SCALE = 1024
-const PARAMS_BYTES = 64
+const PARAMS_BYTES = 96
 const PARTICLE_BYTES = 16
 const AGENT_WORKGROUP = 64
 const DIFFUSE_WORKGROUP = 8
 const MAX_GROUPS_PER_ROW = 32768
+// Deposit is scaled so total trail laid per step is the same at every particle
+// count; a phone's organism is sparser but not dimmer than a desktop's.
+const REFERENCE_COUNT = 1_000_000
+const GATHER_STEPS = 50
+const GATHER_RATE = 0.09
+const GATHER_DECAY = 0.82
+const FADE_IN_STEPS = 45
+
 
 async function compile(device: GPUDevice, label: string, body: string): Promise<GPUShaderModule> {
   const module = device.createShaderModule({ label, code: `${paramsWgsl}\n${body}` })
@@ -38,12 +53,17 @@ async function compile(device: GPUDevice, label: string, body: string): Promise<
 
 export class Simulation {
   readonly settings: SimSettings
+  private form: Form
   private readonly device: GPUDevice
   private readonly paramsBuffer: GPUBuffer
   private readonly paramsData = new DataView(new ArrayBuffer(PARAMS_BYTES))
   private readonly depositBuffer: GPUBuffer
   private readonly initPipeline: GPUComputePipeline
   private readonly stepPipeline: GPUComputePipeline
+  private readonly gatherPipeline: GPUComputePipeline
+  private readonly posterPipeline: GPURenderPipeline
+  private readonly buffers: GPUBuffer[]
+  private readonly trails: GPUBuffer[]
   private readonly diffusePipeline: GPUComputePipeline
   private readonly renderPipeline: GPURenderPipeline
   // Index n: trail buffer n is the one being read this step.
@@ -56,11 +76,14 @@ export class Simulation {
   private canvasW = 1
   private canvasH = 1
   private frame = 0
+  private gatherLeft = 0
+  private pending: Form | null = null
 
   static async create(
     device: GPUDevice,
     format: GPUTextureFormat,
     settings: SimSettings,
+    form: Form,
   ): Promise<Simulation> {
     device.pushErrorScope('validation')
     const [agents, diffuse, render] = await Promise.all([
@@ -68,7 +91,7 @@ export class Simulation {
       compile(device, 'diffuse', diffuseWgsl),
       compile(device, 'render', renderWgsl),
     ])
-    const sim = new Simulation(device, format, settings, agents, diffuse, render)
+    const sim = new Simulation(device, format, settings, form, agents, diffuse, render)
     const error = await device.popErrorScope()
     if (error) throw new Error(`WebGPU validation failed: ${error.message}`)
     return sim
@@ -78,12 +101,14 @@ export class Simulation {
     device: GPUDevice,
     format: GPUTextureFormat,
     settings: SimSettings,
+    form: Form,
     agents: GPUShaderModule,
     diffuse: GPUShaderModule,
     render: GPUShaderModule,
   ) {
     this.device = device
     this.settings = settings
+    this.form = form
 
     const cells = settings.grid * settings.grid
     const groups = Math.ceil(settings.count / AGENT_WORKGROUP)
@@ -101,14 +126,16 @@ export class Simulation {
       usage: GPUBufferUsage.STORAGE,
     })
     const trailUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-    const trails = [0, 1].map((n) =>
+    const trails = (this.trails = [0, 1].map((n) =>
       device.createBuffer({ label: `trail ${n}`, size: cells * 4, usage: trailUsage }),
-    )
+    ))
     this.depositBuffer = device.createBuffer({
       label: 'deposits',
       size: cells * 4,
       usage: trailUsage,
     })
+
+    this.buffers = [this.paramsBuffer, particles, this.depositBuffer, ...trails]
 
     const uniform: GPUBufferBindingLayout = { type: 'uniform' }
     const readOnly: GPUBufferBindingLayout = { type: 'read-only-storage' }
@@ -153,18 +180,27 @@ export class Simulation {
       layout: agentPipelineLayout,
       compute: { module: agents, entryPoint: 'step' },
     })
+    this.gatherPipeline = device.createComputePipeline({
+      label: 'gather',
+      layout: agentPipelineLayout,
+      compute: { module: agents, entryPoint: 'gather' },
+    })
     this.diffusePipeline = device.createComputePipeline({
       label: 'diffuse',
       layout: device.createPipelineLayout({ bindGroupLayouts: [diffuseLayout] }),
       compute: { module: diffuse, entryPoint: 'diffuse' },
     })
-    this.renderPipeline = device.createRenderPipeline({
-      label: 'render',
-      layout: device.createPipelineLayout({ bindGroupLayouts: [renderLayout] }),
-      vertex: { module: render, entryPoint: 'vertex' },
-      fragment: { module: render, entryPoint: 'fragment', targets: [{ format }] },
-      primitive: { topology: 'triangle-list' },
-    })
+    const renderPipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [renderLayout] })
+    const renderTo = (label: string, target: GPUTextureFormat): GPURenderPipeline =>
+      device.createRenderPipeline({
+        label,
+        layout: renderPipelineLayout,
+        vertex: { module: render, entryPoint: 'vertex' },
+        fragment: { module: render, entryPoint: 'fragment', targets: [{ format: target }] },
+        primitive: { topology: 'triangle-list' },
+      })
+    this.renderPipeline = renderTo('render', format)
+    this.posterPipeline = renderTo('poster', 'rgba8unorm')
 
     const params = { buffer: this.paramsBuffer }
     this.agentGroups = [0, 1].map((n) =>
@@ -199,40 +235,95 @@ export class Simulation {
       }),
     )
 
-    // Buffers start zeroed, so only the particles need a first pass.
-    this.writeParams()
-    const encoder = device.createCommandEncoder({ label: 'init' })
-    const pass = encoder.beginComputePass()
-    pass.setPipeline(this.initPipeline)
-    pass.setBindGroup(0, this.agentGroups[0])
-    pass.dispatchWorkgroups(this.agentRowGroups, this.agentRows)
-    pass.end()
-    device.queue.submit([encoder.finish()])
+    this.runInit()
   }
 
   get frameCount(): number {
     return this.frame
   }
 
-  private writeParams(): void {
+  get gathering(): boolean {
+    return this.gatherLeft > 0
+  }
+
+  // Grow a new form. Particles first stream to the new start arrangement, then the
+  // trail is wiped and the run starts from step 0, so the result depends only on
+  // the word and never on what was on screen before.
+  transitionTo(form: Form): void {
+    this.pending = form
+    this.gatherLeft = GATHER_STEPS
+  }
+
+  // Cut straight to a form with no entrance (first load, tier change).
+  reset(form: Form): void {
+    this.form = form
+    this.pending = null
+    this.gatherLeft = 0
+    this.runInit()
+  }
+
+  destroy(): void {
+    for (const buffer of this.buffers) buffer.destroy()
+  }
+
+  // Resolves once the GPU has finished everything submitted so far.
+  idle(): Promise<undefined> {
+    return this.device.queue.onSubmittedWorkDone()
+  }
+
+  private runInit(): void {
+    this.frame = 0
+    this.source = 0
+    this.writeParams()
+    const encoder = this.device.createCommandEncoder({ label: 'init' })
+    for (const trail of this.trails) encoder.clearBuffer(trail)
+    const pass = encoder.beginComputePass()
+    pass.setPipeline(this.initPipeline)
+    pass.setBindGroup(0, this.agentGroups[0])
+    pass.dispatchWorkgroups(this.agentRowGroups, this.agentRows)
+    pass.end()
+    this.device.queue.submit([encoder.finish()])
+  }
+
+  // Brightness envelope: dims out while gathering, blooms in from step 0.
+  private fade(): number {
+    if (this.gatherLeft > 0) {
+      const t = this.gatherLeft / GATHER_STEPS
+      return t * t * (3 - 2 * t)
+    }
+    const t = Math.min(this.frame / FADE_IN_STEPS, 1)
+    return t * t * (3 - 2 * t)
+  }
+
+  private writeParams(quality = 0, fade = this.fade()): void {
     const s = this.settings
+    // While gathering, the target arrangement comes from the pending form.
+    const f = this.gatherLeft > 0 && this.pending ? this.pending : this.form
+    const look = this.form
     const d = this.paramsData
     d.setUint32(0, s.grid, true)
     d.setUint32(4, s.grid, true)
     d.setUint32(8, s.count, true)
     d.setUint32(12, this.frame, true)
-    d.setUint32(16, s.seed >>> 0, true)
+    d.setUint32(16, f.seed >>> 0, true)
     d.setUint32(20, this.agentRowGroups * AGENT_WORKGROUP, true)
-    d.setUint32(24, Math.round(s.deposit * TRAIL_SCALE), true)
-    d.setUint32(28, s.startShape, true)
-    d.setFloat32(32, s.sensorAngle, true)
-    d.setFloat32(36, s.sensorDist, true)
-    d.setFloat32(40, s.turnAngle, true)
-    d.setFloat32(44, s.stepSize, true)
-    d.setFloat32(48, s.decay, true)
+    d.setUint32(24, Math.max(1, Math.round((TRAIL_SCALE * REFERENCE_COUNT) / s.count)), true)
+    d.setUint32(28, f.startShape, true)
+    d.setFloat32(32, look.sensorAngle, true)
+    d.setFloat32(36, look.sensorDist, true)
+    d.setFloat32(40, look.turnAngle, true)
+    d.setFloat32(44, look.stepSize, true)
+    d.setFloat32(48, this.gatherLeft > 0 ? Math.min(look.decay, GATHER_DECAY) : look.decay, true)
     d.setFloat32(52, this.canvasW, true)
     d.setFloat32(56, this.canvasH, true)
-    d.setFloat32(60, s.exposure, true)
+    d.setFloat32(60, look.exposure, true)
+    d.setFloat32(64, look.hue, true)
+    d.setFloat32(68, fade, true)
+    d.setFloat32(72, GATHER_RATE, true)
+    d.setUint32(76, quality, true)
+    d.setUint32(80, f.heading, true)
+    d.setFloat32(84, f.shapeSize, true)
+    d.setFloat32(88, look.crowd, true)
     this.device.queue.writeBuffer(this.paramsBuffer, 0, d.buffer)
   }
 
@@ -240,10 +331,11 @@ export class Simulation {
   // lives in the uniform buffer, and a buffer write lands between submits.
   step(): void {
     this.writeParams()
+    const gathering = this.gatherLeft > 0
     const encoder = this.device.createCommandEncoder({ label: 'step' })
     encoder.clearBuffer(this.depositBuffer)
     const compute = encoder.beginComputePass()
-    compute.setPipeline(this.stepPipeline)
+    compute.setPipeline(gathering ? this.gatherPipeline : this.stepPipeline)
     compute.setBindGroup(0, this.agentGroups[this.source])
     compute.dispatchWorkgroups(this.agentRowGroups, this.agentRows)
     compute.setPipeline(this.diffusePipeline)
@@ -254,19 +346,43 @@ export class Simulation {
     this.device.queue.submit([encoder.finish()])
     this.source = 1 - this.source
     this.frame += 1
+
+    if (gathering) {
+      this.gatherLeft -= 1
+      if (this.gatherLeft === 0 && this.pending) this.reset(this.pending)
+    }
   }
 
   draw(target: GPUTextureView, canvasW: number, canvasH: number): void {
     this.canvasW = canvasW
     this.canvasH = canvasH
-    this.writeParams()
+    this.encodeDraw(target, this.renderPipeline, 0, this.fade())
+  }
+
+  // Poster draw: square, bicubic, full brightness. Restores the live canvas size after.
+  drawPoster(target: GPUTextureView, size: number): void {
+    const [w, h] = [this.canvasW, this.canvasH]
+    this.canvasW = size
+    this.canvasH = size
+    this.encodeDraw(target, this.posterPipeline, 1, 1)
+    this.canvasW = w
+    this.canvasH = h
+  }
+
+  private encodeDraw(
+    target: GPUTextureView,
+    pipeline: GPURenderPipeline,
+    quality: number,
+    fade: number,
+  ): void {
+    this.writeParams(quality, fade)
     const encoder = this.device.createCommandEncoder({ label: 'draw' })
     const pass = encoder.beginRenderPass({
       colorAttachments: [
         { view: target, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' },
       ],
     })
-    pass.setPipeline(this.renderPipeline)
+    pass.setPipeline(pipeline)
     pass.setBindGroup(0, this.renderGroups[this.source])
     pass.draw(3)
     pass.end()

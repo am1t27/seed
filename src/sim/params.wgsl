@@ -17,6 +17,14 @@ struct Params {
   canvasW: f32,
   canvasH: f32,
   exposure: f32,
+  hue: f32, // 0 blue, 1 green, within the bioluminescent range
+  fade: f32, // 0..1 brightness envelope for entrances
+  gatherRate: f32, // share of the remaining distance covered per gather step
+  quality: u32, // 0 bilinear (live), 1 bicubic (poster)
+  heading: u32, // 0 inward, 1 outward, 2 random, 3 tangent
+  shapeSize: f32, // start shape radius, as a share of the half grid
+  crowd: f32, // trail amount above which a filament stops attracting
+  pad1: u32,
 }
 
 // Trail cells are u32 fixed point: stored value / TRAIL_SCALE = trail amount.

@@ -41,11 +41,48 @@ fn cellIndex(p: vec2<f32>) -> u32 {
 
 fn sense(pos: vec2<f32>, angle: f32) -> f32 {
   let p = wrap(pos + vec2<f32>(cos(angle), sin(angle)) * params.sensorDist);
-  return f32(trail[cellIndex(p)]);
+  // Attraction rises with the trail up to `crowd`, then falls: an overcrowded
+  // filament pushes particles off to found new ones, which keeps networks fine.
+  let value = f32(trail[cellIndex(p)]) / TRAIL_SCALE;
+  return min(value, 2.0 * params.crowd - value);
 }
 
 fn particleIndex(gid: vec3<u32>) -> u32 {
   return gid.y * params.strideX + gid.x;
+}
+
+// Where particle i starts. A pure function of the index and the seed, so the
+// same word always begins from the same arrangement.
+fn startState(i: u32) -> Particle {
+  let h0 = pcg(i ^ pcg(params.seed));
+  let h1 = pcg(h0);
+  let h2 = pcg(h1);
+  let grid = vec2<f32>(f32(params.gridW), f32(params.gridH));
+  let center = grid * 0.5;
+  let radius = min(grid.x, grid.y) * 0.5 * params.shapeSize;
+  let theta = unit(h0) * TAU;
+
+  var pos: vec2<f32>;
+  var inward = theta + TAU * 0.5;
+  if (params.startShape == 0u) {
+    pos = center + vec2<f32>(cos(theta), sin(theta)) * sqrt(unit(h1)) * radius;
+  } else if (params.startShape == 1u) {
+    pos = center + vec2<f32>(cos(theta), sin(theta)) * radius * (0.94 + 0.06 * unit(h1));
+  } else {
+    pos = vec2<f32>(unit(h0), unit(h1)) * grid;
+    let toCenter = center - pos;
+    inward = atan2(toCenter.y, toCenter.x);
+  }
+
+  var angle = inward;
+  if (params.heading == 1u) {
+    angle = inward + TAU * 0.5;
+  } else if (params.heading == 2u) {
+    angle = unit(h2) * TAU;
+  } else if (params.heading == 3u) {
+    angle = inward + TAU * 0.25;
+  }
+  return Particle(pos.x, pos.y, angle, 0.0);
 }
 
 @compute @workgroup_size(64)
@@ -54,32 +91,29 @@ fn init(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (i >= params.count) {
     return;
   }
-  let h0 = pcg(i ^ pcg(params.seed));
-  let h1 = pcg(h0);
-  let h2 = pcg(h1);
-  let grid = vec2<f32>(f32(params.gridW), f32(params.gridH));
-  let center = grid * 0.5;
-  let radius = min(grid.x, grid.y) * 0.5;
-  let theta = unit(h0) * TAU;
+  particles[i] = startState(i);
+}
 
-  var pos: vec2<f32>;
-  var angle: f32;
-  if (params.startShape == 0u) {
-    // Disc, heading inward.
-    let r = sqrt(unit(h1)) * radius * 0.45;
-    pos = center + vec2<f32>(cos(theta), sin(theta)) * r;
-    angle = theta + TAU * 0.5;
-  } else if (params.startShape == 1u) {
-    // Thin ring, heading inward.
-    let r = radius * (0.62 + 0.04 * unit(h1));
-    pos = center + vec2<f32>(cos(theta), sin(theta)) * r;
-    angle = theta + TAU * 0.5;
-  } else {
-    // Scatter, random heading.
-    pos = vec2<f32>(unit(h0), unit(h1)) * grid;
-    angle = unit(h2) * TAU;
+// Entrance: every particle streams toward its new start position, leaving a
+// trail, so a new word visibly reorganizes the old organism instead of cutting.
+@compute @workgroup_size(64)
+fn gather(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = particleIndex(gid);
+  if (i >= params.count) {
+    return;
   }
-  particles[i] = Particle(pos.x, pos.y, angle, 0.0);
+  var p = particles[i];
+  let goal = startState(i);
+  let grid = vec2<f32>(f32(params.gridW), f32(params.gridH));
+  // Shortest way round the wrapped grid.
+  var delta = vec2<f32>(goal.x - p.x, goal.y - p.y);
+  delta = delta - round(delta / grid) * grid;
+  let next = wrap(vec2<f32>(p.x, p.y) + delta * params.gatherRate);
+  p.x = next.x;
+  p.y = next.y;
+  p.angle = goal.angle;
+  particles[i] = p;
+  atomicAdd(&deposits[cellIndex(next)], params.deposit);
 }
 
 @compute @workgroup_size(64)
