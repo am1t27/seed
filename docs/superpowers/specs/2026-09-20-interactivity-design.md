@@ -241,38 +241,71 @@ anything other than an option.
 
 ### 6. Export a loop
 
-A five second 1080 by 1080 video alongside the existing poster.
+A 1080 by 1080 MP4 alongside the existing poster. Six seconds, 30 fps.
 
-**Approach.** A hidden second canvas at 1080 by 1080 with its own WebGPU
-context, drawn each frame while recording, so the visible canvas is never
-resized or disturbed.
+**Why a video at all.** The strongest documented pattern in pieces that spread
+is that the artifact leaving the site is a native object of the destination
+rather than a link back. Wordle's emoji grid is the clearest case: plain
+Unicode, pastes anywhere, no upload. A video is the closest equivalent here,
+because a still of a simulation loses the only thing that makes it interesting.
 
-Two encoders are possible and the choice is recorded here rather than left
-open:
+**Encoder.** WebCodecs `VideoEncoder` with AVC, muxed to MP4, encoding offline
+at fixed timestamps rather than in real time. Frame accurate, faster than real
+time, and it produces a normal MP4 with a correct duration.
 
-- **WebCodecs `VideoEncoder` plus an MP4 muxer** is the primary path. It
-  encodes a known number of frames with no real-time requirement, produces MP4
-  with H.264, and does not depend on the tab staying in the foreground. It
-  needs one small MIT dependency for muxing.
-- **`MediaRecorder`** is the fallback where WebCodecs or the H.264 codec is
-  unavailable. It records the canvas stream in real time, which means five real
-  seconds and a tab that must stay visible. This path is already proven in this
-  codebase: the fallback video was recorded with it.
+`MediaRecorder` is the fallback, not the primary path, for two reasons. It
+records in real time, so six seconds of video costs six seconds of wall clock
+and drops frames if a compute pass stalls. And Chrome and Safari both emit a
+fragmented MP4 whose `moov` atom carries a zero duration, so players cannot
+show length or seek without fetching the whole file. Detection order is
+`VideoEncoder.isConfigSupported`, then `MediaRecorder.isTypeSupported` with
+`video/mp4;codecs=avc1`. WebM is never the primary export, because neither
+LinkedIn nor X lists it in their specifications.
 
-Feature detection picks the path at click time, via
-`VideoEncoder.isConfigSupported` and then `MediaRecorder.isTypeSupported`.
+**Muxer, and a dependency decision.** `mp4-muxer` is deprecated in favour of
+Mediabunny by the same author. Mediabunny is pure TypeScript with no
+dependencies of its own, is tree shakable, has a `CanvasSource` helper, and
+writes AVC. It is **MPL-2.0, not MIT**. MPL is file level weak copyleft:
+consuming it unmodified as a dependency carries no obligation on this project's
+own code, and it is fine here. If its own source files are ever edited, those
+changes have to be published.
 
-**Loop quality.** The recording starts from a grown organism, not from black,
-and the simulation continues through the recording. A true seamless loop is not
-achievable from a chaotic system, so the last 400 ms cross-fades to the first
-frame. This is honest and it reads as a loop.
+This is the first runtime dependency in the project, so the README claim of
+"zero runtime dependencies" becomes false and must be corrected in the same
+commit. That is the cost of this feature and it is worth naming plainly.
+`canvas-record` (MIT) wraps the same tier selection and supports WebGPU
+canvases; it is the alternative if the MPL term is unwelcome, at the price of a
+larger dependency tree.
 
-**Feedback.** The button reports progress and disables itself while recording.
-The real time path must say that the tab needs to stay visible.
+**WebGPU specific hazard.** A canvas presentation texture is destroyed at the
+end of the animation frame that produced it. The recording context must be
+configured with `COPY_SRC` usage, and the `VideoFrame` must be constructed
+inside the same frame that renders it. Getting this wrong produces an empty or
+black recording rather than an error.
 
-**Verification.** The file plays in a browser, uploads to LinkedIn and X, and
-is under roughly 8 MB. Tested on the M2 in Chrome at minimum, with the
-fallback path exercised by forcing detection to fail.
+**Audio.** LinkedIn and X both specify AAC in their accepted formats. I could
+not find an authoritative statement that either rejects a video with no audio
+track, and found no test either way, so a silent AAC track is muxed in as cheap
+insurance. This must be tested on a real post before the feature is announced.
+
+**Bitrate and size.** Physarum is high entropy, all thin filaments and fine
+detail, so it compresses worse than live action. Budget 10 Mbps rather than the
+2.5 to 5 Mbps typical of 1080p video. At 10 Mbps six seconds is roughly 7 MB,
+three orders of magnitude under either platform's ceiling, so bias toward the
+higher bitrate. That figure is arithmetic, not a measured encode, and must be
+replaced with a real number in `NOTES.md` once one exists.
+
+**Length.** LinkedIn requires at least three seconds. Six is the target, which
+leaves margin.
+
+**Looping.** Physarum is not periodic and no prior art solves this for it, so a
+capture is a clip that will visibly cut. The last 400 ms cross-fades to the
+first frame. This is honest and reads as a loop; it is not a true one, and the
+README should not claim otherwise.
+
+**Verification.** The file plays in a browser, reports a correct duration,
+uploads to LinkedIn and to X, and is under about 8 MB. The `MediaRecorder`
+fallback is exercised by forcing detection to fail.
 
 ### 7. Other words, visible
 
@@ -338,8 +371,12 @@ reports meaningless numbers.
 - **The activity channel can look like noise** at low particle tiers, where
   deposits are sparse. Its strength should scale with the tier, the same way
   deposit strength already does.
-- **WebCodecs support is uneven.** Hence the detection and the proven
-  `MediaRecorder` fallback.
+- **WebCodecs is not Baseline.** Chrome and Edge since 94, Firefox desktop
+  since 130 but not Firefox Android, Safari reaching parity in 26. Hence the
+  detection and the `MediaRecorder` fallback, which is already proven in this
+  codebase.
+- **Feature 6 adds the project's first runtime dependency**, which invalidates a
+  claim the README currently makes. Correct the claim in the same commit.
 - **Everything is still unverified off the M2.** The PC, a phone and Safari
   remain unmeasured, and the README must keep saying so.
 
@@ -348,3 +385,71 @@ reports meaningless numbers.
 Features ship in the order they are numbered above: 1, 2 and 3 in phase one, 4
 and 5 in phase two, 6 and 7 in phase three. Each feature is its own commit under Amit's git identity, pushed to
 `am1t27/seed`, with no AI attribution in the message.
+
+## References and licensing
+
+This project may read and learn from permissively licensed work, and must not
+copy from copyleft or non-commercial work. The distinction matters most in
+phase two, where a widely copied pattern has a license that rules it out.
+
+**Safe to read, permissive:**
+
+- `amandaghassaei/gpu-io` (MIT), whose Physarum example injects attractant at
+  the pointer. The closest readable reference to feature 1.
+- `Bewelge/Physarum-WebGL` (MIT), three species with per-species sensing and
+  cross-infection. The closest readable reference to feature 5.
+- `tobiaslrn/physarum` (MIT), WebGPU, multiple colonies that can attract or
+  repel each other.
+- `fogleman/physarum` (MIT), already used for parameter ranges.
+
+**Must not copy:**
+
+- `SebLague/Slime-Simulation` is GPL-3.0 and is the origin of the RGBA
+  species-mask pattern, where each species occupies one color channel and
+  agents sense only their own. A large share of blog posts, tutorials and
+  YouTube ports descend from it, so anything resembling that pattern needs its
+  lineage checked. Feature 5 here uses separate trail buffers and a separate
+  per-species uniform buffer, which is a different structure arrived at for a
+  different reason, namely avoiding uniform array alignment rules.
+- `SuboptimalEng/slime-sim-webgpu` is CC BY-NC-SA 4.0.
+- `Bleuje/interactive-physarum` is CC BY-NC-SA 3.0. Its
+  [explanation page](https://bleuje.com/physarum-explanation/) is excellent and
+  already credited in the README. Read the page, not the code.
+- Sage Jenson's work has no released source.
+
+Obstacles and trail-age coloring have no licensed reference worth copying and
+are a few lines each, so features 3 and 4 are written from scratch.
+
+## Evidence behind the sequencing
+
+The two mechanics with the clearest track record in pieces that spread are
+already in this plan, which is why they come first.
+
+- **State in the URL plus a visible per-keystroke response.** tixy.land holds a
+  32 character program in the URL and re-renders as you type. Seed already has
+  the URL half; feature 2 adds the other half.
+- **A single text field that reacts to every character.** The Password Game is
+  one input whose page mutates on each keystroke. Same shape as this page.
+- **Pointer drag as the whole interface, no chrome.** The WebGL fluid
+  simulation has no buttons and no onboarding. This is the retention mechanic
+  rather than the sharing one, which is the right way to value feature 1.
+
+None of this is causal evidence. It is journalism and creator self-reports
+about pieces that did spread, and it is correlational. It is enough to order
+the work and not enough to make a promise about outcomes.
+
+## Considered and not included
+
+**Per-particle parameter modulation.** Sage Jenson's later work varies sensor
+distance, sensor angle, turn angle and step size per particle from the locally
+sensed trail value, rather than holding them fixed for the whole population.
+This is the main reason his images have a multi-scale quality that a fixed
+parameter run does not. It is a small change to `agents.wgsl` and would make
+every family look more sophisticated.
+
+It is not in the approved seven, so it is recorded here rather than added. It
+would be a strong candidate for an eighth feature.
+
+**Shared global state**, where every visitor sees the same field. It spreads
+well, needs a server, attracts bots quickly, and contradicts this project's
+free and static constraint.
