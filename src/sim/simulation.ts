@@ -37,6 +37,14 @@ const REFERENCE_COUNT = 1_000_000
 const GATHER_STEPS = 50
 const GATHER_DECAY = 0.82
 const FADE_IN_STEPS = 45
+// Pointer tuning, in grid cells and trail units. Found by eye; see NOTES.md.
+// The wound was swept on "ocean" at 1M particles: 3 steps at radius 55 refilled
+// before it could be seen, 30 steps emptied the area for good, and 18 steps at
+// radius 70 leaves a plain dark hole that the network grows back through.
+const FEED_RADIUS = 30
+const FEED_STRENGTH = 5
+const WOUND_RADIUS = 70
+const WOUND_STEPS = 18
 
 
 async function compile(device: GPUDevice, label: string, body: string): Promise<GPUShaderModule> {
@@ -75,6 +83,15 @@ export class Simulation {
   private canvasW = 1
   private canvasH = 1
   private frame = 0
+  private pointerX = 0
+  private pointerY = 0
+  private pointerFeed = 0
+  private pointerRadius = FEED_RADIUS
+  // A wound keeps its own position: the release that fires it also stops the
+  // feed, and that must not drag the hole somewhere else.
+  private woundX = 0
+  private woundY = 0
+  private woundLeft = 0
   private gatherLeft = 0
   private pending: Form | null = null
 
@@ -253,6 +270,27 @@ export class Simulation {
     this.gatherLeft = GATHER_STEPS
   }
 
+  // Feed the organism at a point. Strength 0 stops feeding. Grid coordinates.
+  setPointer(x: number, y: number, strength: number): void {
+    const share = this.inGrid(x, y) ? Math.max(0, Math.min(1, strength)) : 0
+    this.pointerX = x
+    this.pointerY = y
+    this.pointerFeed = share * FEED_STRENGTH
+  }
+
+  // Tear a hole. It applies over a few steps so it is unmistakable, then heals.
+  wound(x: number, y: number): void {
+    if (!this.inGrid(x, y)) return
+    this.woundX = x
+    this.woundY = y
+    this.woundLeft = WOUND_STEPS
+  }
+
+  private inGrid(x: number, y: number): boolean {
+    const grid = this.settings.grid
+    return x >= 0 && y >= 0 && x < grid && y < grid
+  }
+
   // Cut straight to a form with no entrance (first load, tier change).
   reset(form: Form): void {
     this.form = form
@@ -325,13 +363,12 @@ export class Simulation {
     d.setUint32(80, f.heading, true)
     d.setFloat32(84, f.shapeSize, true)
     d.setFloat32(88, look.crowd, true)
-    // Pointer and the new look controls. All zero until later tasks set them,
-    // so this task changes the layout and nothing else.
-    d.setFloat32(92, 0, true)
-    d.setFloat32(96, 0, true)
-    d.setFloat32(100, 0, true)
-    d.setFloat32(104, 0, true)
-    d.setFloat32(108, 0, true)
+    const wounding = this.woundLeft > 0
+    d.setFloat32(92, wounding ? this.woundX : this.pointerX, true)
+    d.setFloat32(96, wounding ? this.woundY : this.pointerY, true)
+    d.setFloat32(100, wounding ? 0 : this.pointerFeed, true)
+    d.setFloat32(104, wounding ? 1 : 0, true)
+    d.setFloat32(108, wounding ? WOUND_RADIUS : this.pointerRadius, true)
     d.setFloat32(112, 0, true)
     d.setFloat32(116, 0, true)
     d.setFloat32(120, 0, true)
@@ -357,6 +394,7 @@ export class Simulation {
     this.device.queue.submit([encoder.finish()])
     this.source = 1 - this.source
     this.frame += 1
+    if (this.woundLeft > 0) this.woundLeft -= 1
 
     if (gathering) {
       this.gatherLeft -= 1

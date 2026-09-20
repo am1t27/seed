@@ -24,6 +24,22 @@ fn diffuse(@builtin(global_invocation_id) gid: vec3<u32>) {
       sum += min(trailIn[c], CELL_MAX) + min(deposits[c], CELL_MAX >> 1u);
     }
   }
-  let blurred = f32(sum) * (params.decay / 9.0);
-  trailOut[gid.y * params.gridW + gid.x] = u32(min(blurred, f32(CELL_MAX)));
+  var value = f32(sum) * (params.decay / 9.0);
+
+  // The pointer. Feeding adds trail, which particles then sense and follow.
+  // Wounding scales trail down, which tears a hole the network grows back into.
+  // Both are radial and both are zero when nothing is touching the field.
+  if (params.pointerFeed > 0.0 || params.pointerWound > 0.0) {
+    let grid = vec2<f32>(f32(params.gridW), f32(params.gridH));
+    var offset = vec2<f32>(f32(gid.x), f32(gid.y)) - vec2<f32>(params.pointerX, params.pointerY);
+    // The field wraps, so take the shortest way round.
+    offset = offset - round(offset / grid) * grid;
+    let reach = max(params.pointerRadius, 1.0);
+    let falloff = max(0.0, 1.0 - length(offset) / reach);
+    let shaped = falloff * falloff;
+    value += shaped * params.pointerFeed * TRAIL_SCALE;
+    value *= 1.0 - shaped * params.pointerWound;
+  }
+
+  trailOut[gid.y * params.gridW + gid.x] = u32(clamp(value, 0.0, f32(CELL_MAX)));
 }
