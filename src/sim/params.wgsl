@@ -24,7 +24,15 @@ struct Params {
   heading: u32, // 0 inward, 1 outward, 2 random, 3 tangent
   shapeSize: f32, // start shape radius, as a share of the half grid
   crowd: f32, // trail amount above which a filament stops attracting
-  pad1: u32,
+  pointerX: f32, // grid coordinates of the pointer
+  pointerY: f32,
+  pointerFeed: f32, // trail added per step at the pointer, 0 when nothing is touching
+  pointerWound: f32, // share of trail destroyed at the pointer, 0 when not wounding
+  pointerRadius: f32, // grid cells
+  activityDecay: f32, // share of the fast channel kept per step
+  islandEdge: f32, // 0 disables the boundary, else radius as a share of the half grid
+  modulation: f32, // per-particle parameter variation, 0 is a fixed run
+  pad0: u32,
 }
 
 // Trail cells are u32 fixed point: stored value / TRAIL_SCALE = trail amount.

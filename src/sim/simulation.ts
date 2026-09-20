@@ -26,7 +26,7 @@ export interface SimSettings {
 }
 
 const TRAIL_SCALE = 1024
-const PARAMS_BYTES = 96
+const PARAMS_BYTES = 128
 const PARTICLE_BYTES = 16
 const AGENT_WORKGROUP = 64
 const DIFFUSE_WORKGROUP = 8
@@ -325,6 +325,16 @@ export class Simulation {
     d.setUint32(80, f.heading, true)
     d.setFloat32(84, f.shapeSize, true)
     d.setFloat32(88, look.crowd, true)
+    // Pointer and the new look controls. All zero until later tasks set them,
+    // so this task changes the layout and nothing else.
+    d.setFloat32(92, 0, true)
+    d.setFloat32(96, 0, true)
+    d.setFloat32(100, 0, true)
+    d.setFloat32(104, 0, true)
+    d.setFloat32(108, 0, true)
+    d.setFloat32(112, 0, true)
+    d.setFloat32(116, 0, true)
+    d.setFloat32(120, 0, true)
     this.device.queue.writeBuffer(this.paramsBuffer, 0, d.buffer)
   }
 
