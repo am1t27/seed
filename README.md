@@ -1,4 +1,4 @@
-# physarum-seed
+# Seed
 
 Type a word. A million particles reorganize into an organism that belongs to that word.
 Save it as a poster, or share a link that grows the same organism for someone else.
