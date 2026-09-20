@@ -27,10 +27,6 @@ const STEP_MS = 1000 / 60
 const MAX_STEPS_PER_FRAME = 2
 const SLOW_FRAME_MS = 24
 const SLOW_FRAMES_BEFORE_STEP_DOWN = 150
-// After this long with no input, an invisible attractant wanders the field so
-// the organism is never completely still.
-const IDLE_AFTER_MS = 4000
-const IDLE_STRENGTH = 0.22
 
 const LIMITS_OF_INTEREST = [
   'maxBufferSize',
@@ -220,11 +216,11 @@ async function start(): Promise<void> {
 
   ui.showWord(organism.word, linked !== null)
 
-  let lastInputAt = performance.now()
+  // Idle drift lives in the simulation, timed in steps; see sim/drift.ts.
   attachPointer(canvas, GRID, {
     feed: (x, y, strength) => sim.setPointer(x, y, strength),
     wound: (x, y) => sim.wound(x, y),
-    touched: () => (lastInputAt = performance.now()),
+    touched: () => sim.touch(),
   })
 
   grow = (word) => {
@@ -318,17 +314,6 @@ async function start(): Promise<void> {
       steps += 1
     }
     if (owed > STEP_MS) owed = 0 // too far behind: drop the debt instead of spiralling
-
-    // Idle drift. A Lissajous path never repeats on a short cycle, so the
-    // organism keeps reorganizing instead of settling into one shape.
-    if (now - lastInputAt > IDLE_AFTER_MS) {
-      const t = now / 1000
-      sim.setPointer(
-        GRID * (0.5 + 0.3 * Math.sin(t * 0.21)),
-        GRID * (0.5 + 0.3 * Math.sin(t * 0.13 + 1.7)),
-        IDLE_STRENGTH,
-      )
-    }
 
     sim.draw(context.getCurrentTexture().createView(), canvas.width, canvas.height)
 

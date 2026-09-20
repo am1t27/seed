@@ -2,6 +2,7 @@ import paramsWgsl from './params.wgsl?raw'
 import agentsWgsl from './agents.wgsl?raw'
 import diffuseWgsl from './diffuse.wgsl?raw'
 import renderWgsl from './render.wgsl?raw'
+import { driftAt, isIdle, IDLE_STRENGTH } from './drift'
 
 // Everything the word decides. seed.ts builds one of these from the word's hash.
 export interface Form {
@@ -92,6 +93,8 @@ export class Simulation {
   private woundX = 0
   private woundY = 0
   private woundLeft = 0
+  // Step of the last real input. Idle drift is timed from it; see drift.ts.
+  private lastTouchStep = 0
   private gatherLeft = 0
   private pending: Form | null = null
 
@@ -278,6 +281,11 @@ export class Simulation {
     this.pointerFeed = share * FEED_STRENGTH
   }
 
+  // Any real input, even one that feeds nothing, holds the idle drift off.
+  touch(): void {
+    this.lastTouchStep = this.frame
+  }
+
   // Tear a hole. It applies over a few steps so it is unmistakable, then heals.
   wound(x: number, y: number): void {
     if (!this.inGrid(x, y)) return
@@ -312,6 +320,7 @@ export class Simulation {
   private runInit(): void {
     this.frame = 0
     this.source = 0
+    this.lastTouchStep = 0
     this.writeParams()
     const encoder = this.device.createCommandEncoder({ label: 'init' })
     for (const trail of this.trails) encoder.clearBuffer(trail)
@@ -365,9 +374,17 @@ export class Simulation {
     d.setFloat32(84, f.shapeSize, true)
     d.setFloat32(88, look.crowd, true)
     const wounding = this.woundLeft > 0
-    d.setFloat32(92, wounding ? this.woundX : this.pointerX, true)
-    d.setFloat32(96, wounding ? this.woundY : this.pointerY, true)
-    d.setFloat32(100, wounding ? 0 : this.pointerFeed, true)
+    // Idle drift stands in for the pointer when nothing is feeding and nothing
+    // has touched the field lately. It never runs during an entrance.
+    const drifting =
+      this.pointerFeed === 0 && this.gatherLeft === 0 && isIdle(this.frame, this.lastTouchStep)
+    const at = drifting
+      ? driftAt(this.frame, s.grid)
+      : { x: this.pointerX, y: this.pointerY }
+    const feed = drifting ? IDLE_STRENGTH * FEED_STRENGTH : this.pointerFeed
+    d.setFloat32(92, wounding ? this.woundX : at.x, true)
+    d.setFloat32(96, wounding ? this.woundY : at.y, true)
+    d.setFloat32(100, wounding ? 0 : feed, true)
     d.setFloat32(104, wounding ? 1 : 0, true)
     d.setFloat32(108, wounding ? WOUND_RADIUS : this.pointerRadius, true)
     d.setFloat32(112, 0, true)
