@@ -14,6 +14,7 @@ const form = (overrides: Partial<Form> = {}): Form => ({
   decay: 0.8,
   crowd: 12,
   island: 0,
+  modulation: 0,
   exposure: 0.08,
   hue: 0,
   ...overrides,

@@ -17,6 +17,7 @@ export interface Form {
   decay: number // trail kept per step, 0..1
   crowd: number // trail amount where attraction peaks
   island: number // 0 fills the frame, else the colony's radius as a share of the half grid
+  modulation: number // per-particle parameter variation, 0 to 1
   exposure: number
   hue: number // 0 blue .. 1 green
 }
@@ -414,7 +415,7 @@ export class Simulation {
     d.setFloat32(108, wounding ? WOUND_RADIUS : this.pointerRadius, true)
     d.setFloat32(112, ACTIVITY_DECAY, true)
     d.setFloat32(116, look.island, true)
-    d.setFloat32(120, 0, true)
+    d.setFloat32(120, look.modulation, true)
     this.device.queue.writeBuffer(this.paramsBuffer, 0, d.buffer)
   }
 

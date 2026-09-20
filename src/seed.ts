@@ -61,6 +61,7 @@ interface Family {
   // the whole silhouette on a laptop screen, where the cover fit shows about half
   // the grid's height; 0.62 ran off the top and bottom there.
   island?: number
+  modulation?: number // per-particle parameter variation; set per family after a sweep
 }
 
 const DISC = 0
@@ -240,6 +241,7 @@ export function organismFor(rawWord: string): Organism {
       decay: within(family.decay),
       crowd,
       island: family.island ?? 0,
+      modulation: family.modulation ?? 0,
       exposure: (within(BRIGHTNESS) * (family.brightness ?? 1)) / crowd,
       hue: next(),
     },
