@@ -23,6 +23,47 @@
 - **No em dash (U+2014) anywhere**, including code comments and commit messages.
 - **Frame rate numbers only from real Chrome.** The in-app browser pane reports `document.hidden === true` and throttles the GPU. Use `open -a "Google Chrome" "http://localhost:5173/?measure=<name>"`, wait 12 seconds, read `docs/measure-<name>.txt`.
 
+## Before you start
+
+Read the spec named above as well as this plan. Then know these five things,
+because none of them are discoverable from the code.
+
+**Start the dev server yourself and check the port.** `npm run dev` prints the
+port it got. It uses 5173 unless something already holds it, in which case it
+silently takes 5174 and every URL in this plan needs changing to match. Stop any
+other copy first.
+
+**The dev tooling lives on `window.__dev`** and only exists in the dev server
+build, installed from `src/dev.ts`. What this plan uses:
+
+- `__dev.snapshot()` returns the canvas as a PNG data URL. Draw and read happen
+  in one task because a WebGPU canvas is only readable before it presents.
+- `__dev.sheet(entries, steps, columns)` grows several forms one after another
+  and tiles their snapshots over the page, for judging a sweep side by side. An
+  entry is a word, or an object of `Form` overrides with angles in degrees.
+- `__dev.save(path, blob)` writes a file into `public/` or `docs/` through the
+  dev server.
+- `__dev.getSim()`, `__dev.device`, `__dev.getOrganism()`, `__dev.grow(word)`.
+
+**The dev URL parameters**, all stripped from the production build: any `Form`
+field by name (`?sensorDist=9&decay=0.85`, angles in degrees), `?tier=0` to
+force a particle tier, `?warm=600` to fast-forward that many steps before the
+first frame, `?freeze` to stop the clock after the warm-up, `?nogpu` to
+rehearse the no-WebGPU fallback, `?measure=<name>` to write the debug overlay
+to `docs/measure-<name>.txt` after 12 seconds, `?record=a,b,c` to re-record the
+fallback video.
+
+**A hidden tab throttles the GPU and reports nonsense.** The page waits up to 3
+seconds for `document.hidden` to be false before benchmarking, so in an
+automated browser pane `__dev` can take several seconds to appear. Passing
+`?tier=N` skips both the wait and the benchmark, which is why most verification
+URLs in this plan carry it. Any frame rate number must come from real Chrome:
+`open -a "Google Chrome" "http://localhost:5173/?measure=<name>"`.
+
+**The baseline to beat.** On an M2, `?w=tokyo&warm=300&freeze&tier=3` hashes to
+`14a552b5d85c337d` by the snippet in Task 2. On another machine the value
+differs; what matters is that it does not move across Tasks 2 and 9.
+
 ## File structure
 
 **Created:**
