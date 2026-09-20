@@ -79,7 +79,8 @@ buffer and no extra synchronization.
 **Input mapping.** `render.wgsl` maps the square grid onto the canvas with a
 cover fit: `scale = max(canvasW / gridW, canvasH / gridH)`. Pointer input needs
 the inverse of exactly that, and it must live in one place so the two can never
-drift. A `gridFromClient(x, y)` helper in `simulation.ts` owns it.
+drift. A `src/sim/mapping.ts` module owns both directions, with a test pinning them
+together.
 
 **Events.** Pointer Events only, so mouse, touch and pen share one path.
 `pointerdown` starts feeding and sets `setPointerCapture`. `pointermove` while
@@ -115,8 +116,9 @@ the look parameters move while typing.
 On each `input` event, hash the current prefix, build its `Form`, and set it as
 a target. Each frame, the live look parameters ease toward that target by about
 12 percent of the remaining distance, which converges in roughly a third of a
-second. Hue takes the shortest path around its range. The seed, start shape and
-heading are untouched, so no particle is repositioned and no trail is cleared.
+second. Hue is a 0 to 1 blend between the two ends of the colour ramp rather
+than an angle, so it eases linearly with no wraparound. The seed, start shape
+and heading are untouched, so no particle is repositioned and no trail is cleared.
 
 On Enter, the existing `transitionTo` runs: particles stream to the new
 arrangement, the trail is wiped, and the run starts from step zero. This keeps
